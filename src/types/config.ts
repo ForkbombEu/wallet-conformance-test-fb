@@ -16,6 +16,9 @@ const zBooleanFromString = z.union([z.boolean(), z.stringbool()]);
  */
 export const configSchema = z.object({
   issuance: z.object({
+    authorization_interaction: z
+      .enum(["auto", "browser_redirect", "credential_presentation"])
+      .default("auto"),
     /**
      * Port on which the local OAuth2 callback server listens.
      * The `redirect_uri` used in PAR and token requests is
@@ -23,6 +26,9 @@ export const configSchema = z.object({
      */
     callback_port: z.coerce.number().default(4000),
     certificate_subject: z.string().optional(),
+    client_authentication: z
+      .enum(["auto", "attest_jwt_client_auth", "private_key_jwt"])
+      .default("auto"),
     credential_configuration_id_reissuance: z.string().optional(),
     credential_offer_uri: z
       .string()
@@ -61,6 +67,11 @@ export const configSchema = z.object({
     tests_dir: z.string().default("./tests/presentation"),
     verifier: z.string().url().optional(),
   }),
+  profile: z
+    .object({
+      ecosystem: z.enum(["it_wallet", "generic_oid4vci"]).default("it_wallet"),
+    })
+    .default({ ecosystem: "it_wallet" }),
   steps_mapping: z
     .object({
       mapping: z.record(z.string(), z.string()).optional().default({}),
@@ -71,11 +82,13 @@ export const configSchema = z.object({
     .object({
       custom_step_pattern: z.string().default("**/*.ts"),
       spec_pattern: z.string().default("**/*.spec.ts"),
+      strict_custom_steps: zBooleanFromString.optional().default(false),
     })
     .optional()
     .default({
       custom_step_pattern: "**/*.ts",
       spec_pattern: "**/*.spec.ts",
+      strict_custom_steps: false,
     }),
   trust: z.object({
     ca_cert_path: z.string(),

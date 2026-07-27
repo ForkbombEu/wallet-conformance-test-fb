@@ -70,7 +70,10 @@ function buildReportData(
     reportId: `WCR-${session.id.toUpperCase().replace(/-/g, "").slice(0, 24)}`,
     sessionId: session.id,
     solutionName: config?.wallet.wallet_name ?? "-",
-    specVersion: `Regole Tecniche ${config?.wallet.wallet_version.replace("_", ".")}`,
+    specVersion:
+      config?.profile.ecosystem === "generic_oid4vci"
+        ? `Generic OID4VCI interoperability; wallet implementation ${config.wallet.wallet_version}`
+        : `Regole Tecniche ${config?.wallet.wallet_version.replace("_", ".")}`,
     statusLabel: resolveTierLabel(complianceTier),
     totalChecks,
     versionPill: `v${readPackageVersion()}`,

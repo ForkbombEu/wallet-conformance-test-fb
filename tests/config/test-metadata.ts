@@ -12,6 +12,7 @@
 import { loadConfigWithHierarchy } from "@/logic/config-loader";
 import { createLogger } from "@/logic/logs";
 import { resolveWorkspacePath } from "@/logic/runtime-paths";
+import { CustomStepResolutionError } from "@/orchestrator/errors";
 import {
   FetchMetadataDefaultStep,
   NotificationRequestDefaultStep,
@@ -50,6 +51,7 @@ export async function defineIssuanceTest(
     const customSteps = customStepsDir
       ? await testLoader.discoverCustomSteps(customStepsDir)
       : {};
+    assertMappedStepsResolved(name, customStepsDir, customSteps, config);
 
     // Validate credential types configuration
     validateCredentialTypes(config.issuance.credential_types);
@@ -80,6 +82,7 @@ export async function definePresentationTest(
     const customSteps = customStepsDir
       ? await testLoader.discoverCustomSteps(customStepsDir)
       : {};
+    assertMappedStepsResolved(name, customStepsDir, customSteps, config);
 
     // Build and return test configuration
     return buildPresentationTestConfiguration(name, customSteps);
@@ -87,6 +90,20 @@ export async function definePresentationTest(
     log.error(`Error defining presentation test '${name}':`, error);
     throw error;
   }
+}
+
+function assertMappedStepsResolved(
+  flowName: string,
+  directory: string | undefined,
+  customSteps: CustomStepsMap,
+  config: Config,
+): void {
+  if (!directory || Object.keys(customSteps).length > 0) return;
+  const message = `steps_mapping: '${flowName}' resolved to '${directory}', but no compatible custom step was loaded; using defaults`;
+  if (config.testing.strict_custom_steps) {
+    throw new CustomStepResolutionError(flowName, directory);
+  }
+  log.warn(message);
 }
 
 /**

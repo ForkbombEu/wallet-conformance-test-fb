@@ -1,3 +1,4 @@
+/* eslint-disable complexity -- generic and Italian metadata branches are deliberately adjacent during migration. */
 import { IssuerTestConfiguration } from "#/config";
 import {
   AccessTokenRequest,
@@ -11,6 +12,7 @@ import { loadAttestation, loadCredentialsForPresentation } from "@/functions";
 import {
   createLogger,
   loadConfigWithHierarchy,
+  parseCredentialOfferContext,
   partialCallbacks,
   saveCredentialToDisk,
   signJwtCallback,
@@ -204,9 +206,11 @@ export class WalletIssuanceOrchestratorFlow {
   async findCredentialConfig(): Promise<{
     credentialConfigurationIds: string[];
     credentialIssuer: string;
+    issuerState?: string;
   }> {
     let credentialIssuer: string;
     let credentialConfigurationIds: string[];
+    let issuerState: string | undefined;
     if (
       this.config.issuance.credential_offer_uri &&
       this.config.issuance.credential_offer_uri !== ""
@@ -214,11 +218,13 @@ export class WalletIssuanceOrchestratorFlow {
       this.log.info(
         `Resolving Credential Offer: ${this.config.issuance.credential_offer_uri}`,
       );
-      const credentialOffer = await resolveCredentialOffer({
-        callbacks: { fetch },
-        config: this.sdkConfig,
-        credentialOffer: this.config.issuance.credential_offer_uri,
-      });
+      const credentialOffer = parseCredentialOfferContext(
+        await resolveCredentialOffer({
+          callbacks: { fetch },
+          config: this.sdkConfig,
+          credentialOffer: this.config.issuance.credential_offer_uri,
+        }),
+      );
       this.log.debug(
         "Received Credential Offer:\n",
         JSON.stringify(credentialOffer),
@@ -226,6 +232,7 @@ export class WalletIssuanceOrchestratorFlow {
 
       credentialIssuer = credentialOffer.credential_issuer;
       credentialConfigurationIds = credentialOffer.credential_configuration_ids;
+      issuerState = credentialOffer.grants?.authorization_code?.issuer_state;
 
       if (credentialConfigurationIds.length === 0)
         throw new OrchestratorError(
@@ -250,7 +257,11 @@ export class WalletIssuanceOrchestratorFlow {
           "CREDENTIAL_CONFIGURATION_ID_UNRESOLVED",
         );
     }
-    return { credentialConfigurationIds, credentialIssuer };
+    return {
+      credentialConfigurationIds,
+      credentialIssuer,
+      issuerState,
+    };
   }
 
   getConfig(): Config {
@@ -414,14 +425,16 @@ export class WalletIssuanceOrchestratorFlow {
     } = parCtx;
     const entityStatementClaims =
       fetchMetadataResponse.response?.entityStatementClaims;
+    const issuerDiscovery = fetchMetadataResponse.response?.issuerDiscovery;
 
     this.log.debug(
       `Code Verifier generated for Pushed Authorization '${pushedAuthorizationRequestResponse.response?.codeVerifier}'`,
     );
 
-    const authorizationEndpoint =
-      entityStatementClaims.metadata?.oauth_authorization_server
-        ?.authorization_endpoint;
+    const authorizationEndpoint = issuerDiscovery
+      ? issuerDiscovery.authorizationServerMetadata.authorization_endpoint
+      : entityStatementClaims?.metadata?.oauth_authorization_server
+          ?.authorization_endpoint;
 
     if (!authorizationEndpoint)
       throw new IssuerMetadataError(
@@ -437,15 +450,14 @@ export class WalletIssuanceOrchestratorFlow {
       this.log,
     );
     const authorizeResponse = await this.authorizeStep.run({
-      authorizationEndpoint:
-        entityStatementClaims.metadata?.oauth_authorization_server
-          ?.authorization_endpoint,
+      authorizationEndpoint,
+      authorizationInteraction: this.config.issuance.authorization_interaction,
       baseUrl: credentialIssuer,
       clientId: walletAttestationResponse.unitKey.publicKey.kid,
       credentialIdentifier: this.issuanceConfig.credentialConfigurationId,
       credentials,
       requestUri: pushedAuthorizationRequestResponse.response?.request_uri,
-      rpMetadata: entityStatementClaims.metadata?.openid_credential_verifier,
+      rpMetadata: entityStatementClaims?.metadata?.openid_credential_verifier,
       walletAttestation: walletAttestationResponse,
     });
     this._authorizeResponse = authorizeResponse;
@@ -471,7 +483,7 @@ export class WalletIssuanceOrchestratorFlow {
     this.printTestSuiteOnce();
     this.log.info("Starting Test Issuance Flow...");
 
-    const { credentialConfigurationIds, credentialIssuer } =
+    const { credentialConfigurationIds, credentialIssuer, issuerState } =
       await this.findCredentialConfig();
 
     this.log.info(
@@ -505,7 +517,8 @@ export class WalletIssuanceOrchestratorFlow {
 
     const entityStatementClaims =
       fetchMetadataResponse.response?.entityStatementClaims;
-    if (!entityStatementClaims) {
+    const issuerDiscovery = fetchMetadataResponse.response?.issuerDiscovery;
+    if (!entityStatementClaims && !issuerDiscovery) {
       throw new OrchestratorError(
         "Fetch Metadata step returned no entity statement claims. " +
           "Verify the issuer URL is reachable and returns a valid " +
@@ -515,9 +528,11 @@ export class WalletIssuanceOrchestratorFlow {
     }
 
     // Validate credentialConfigurationId is supported by the issuer
-    const credentialConfigsSupported =
-      entityStatementClaims.metadata?.openid_credential_issuer
-        ?.credential_configurations_supported;
+    const credentialConfigsSupported = issuerDiscovery
+      ? issuerDiscovery.credentialIssuerMetadata
+          .credential_configurations_supported
+      : entityStatementClaims?.metadata?.openid_credential_issuer
+          ?.credential_configurations_supported;
 
     if (credentialConfigsSupported) {
       const supportedIds = Object.keys(credentialConfigsSupported);
@@ -558,9 +573,11 @@ export class WalletIssuanceOrchestratorFlow {
       jti: randomUUID(),
     });
 
-    const pushedAuthorizationRequestEndpoint =
-      entityStatementClaims.metadata?.oauth_authorization_server
-        ?.pushed_authorization_request_endpoint;
+    const pushedAuthorizationRequestEndpoint = issuerDiscovery
+      ? issuerDiscovery.authorizationServerMetadata
+          .pushed_authorization_request_endpoint
+      : entityStatementClaims?.metadata?.oauth_authorization_server
+          ?.pushed_authorization_request_endpoint;
 
     if (!pushedAuthorizationRequestEndpoint) {
       throw new IssuerMetadataError(
@@ -574,6 +591,7 @@ export class WalletIssuanceOrchestratorFlow {
       await this.pushedAuthorizationRequestStep.run({
         baseUrl: credentialIssuer,
         credentialConfigurationIds,
+        issuerState,
         popAttestation,
         pushedAuthorizationRequestEndpoint,
         walletAttestation: walletAttestationResponse,
@@ -594,7 +612,10 @@ export class WalletIssuanceOrchestratorFlow {
     );
 
     return {
-      authorizationServer: entityStatementClaims.iss,
+      authorizationServer:
+        issuerDiscovery?.authorizationServer ??
+        entityStatementClaims?.iss ??
+        credentialIssuer,
       credentialIssuer,
       fetchMetadataResponse,
       popAttestation,
@@ -623,6 +644,7 @@ export class WalletIssuanceOrchestratorFlow {
 
     const entityStatementClaims =
       fetchMetadataResponse.response?.entityStatementClaims;
+    const issuerDiscovery = fetchMetadataResponse.response?.issuerDiscovery;
 
     if (
       !authorizeResponse.response ||
@@ -656,9 +678,10 @@ export class WalletIssuanceOrchestratorFlow {
     };
 
     const tokenResponse = await this.tokenRequestStep.run({
-      accessTokenEndpoint:
-        entityStatementClaims.metadata?.oauth_authorization_server
-          ?.token_endpoint,
+      accessTokenEndpoint: issuerDiscovery
+        ? issuerDiscovery.authorizationServerMetadata.token_endpoint
+        : entityStatementClaims?.metadata?.oauth_authorization_server
+            ?.token_endpoint,
       accessTokenRequest,
       popAttestation,
       walletAttestation: walletAttestationResponse,
@@ -754,11 +777,13 @@ export class WalletIssuanceOrchestratorFlow {
   }> {
     const entityStatementClaims =
       fetchMetadataResponse.response?.entityStatementClaims;
+    const issuerDiscovery = fetchMetadataResponse.response?.issuerDiscovery;
 
     const nonceResponse = await this.nonceRequestStep.run({
-      nonceEndpoint:
-        entityStatementClaims.metadata?.openid_credential_issuer
-          ?.nonce_endpoint,
+      nonceEndpoint: issuerDiscovery
+        ? issuerDiscovery.credentialIssuerMetadata.nonce_endpoint
+        : entityStatementClaims?.metadata?.openid_credential_issuer
+            ?.nonce_endpoint,
     });
     this._nonceResponse = nonceResponse;
     this.log.flowStep(
@@ -781,9 +806,10 @@ export class WalletIssuanceOrchestratorFlow {
       clientId: walletAttestationResponse.unitKey.publicKey.kid,
       credentialIdentifier,
       credentialIssuer: credentialIssuer,
-      credentialRequestEndpoint:
-        entityStatementClaims.metadata?.openid_credential_issuer
-          ?.credential_endpoint,
+      credentialRequestEndpoint: issuerDiscovery
+        ? issuerDiscovery.credentialIssuerMetadata.credential_endpoint
+        : entityStatementClaims?.metadata?.openid_credential_issuer
+            ?.credential_endpoint,
       dPoPKey,
       nonce: nonce.c_nonce,
       walletAttestation: walletAttestationResponse,

@@ -34,6 +34,16 @@ export class CredentialConfigurationError extends OrchestratorError {
   }
 }
 
+export class CustomStepResolutionError extends OrchestratorError {
+  constructor(flowName: string, directory: string) {
+    super(
+      `No compatible custom step was loaded for '${flowName}' from '${directory}'.`,
+      "CUSTOM_STEP_RESOLUTION_FAILED",
+    );
+    this.name = "CustomStepResolutionError";
+  }
+}
+
 export class DeferredIssuancePreconditionError extends OrchestratorError {
   constructor() {
     super(
@@ -61,6 +71,29 @@ export class IssuerMetadataError extends OrchestratorError {
     this.missingField = missingField;
     this.parentObject = parentObject;
     this.requiredFor = requiredFor;
+  }
+}
+
+export class MetadataDiscoveryError extends OrchestratorError {
+  readonly url: string;
+
+  constructor(url: string, reason: string) {
+    super(
+      `Metadata discovery failed for '${url}': ${reason}`,
+      "METADATA_DISCOVERY_FAILED",
+    );
+    this.name = "MetadataDiscoveryError";
+    this.url = url;
+  }
+}
+
+export class ProfileCapabilityMismatchError extends OrchestratorError {
+  constructor(profile: string, capability: string) {
+    super(
+      `Profile '${profile}' cannot safely use advertised capability '${capability}'.`,
+      "PROFILE_CAPABILITY_MISMATCH",
+    );
+    this.name = "ProfileCapabilityMismatchError";
   }
 }
 

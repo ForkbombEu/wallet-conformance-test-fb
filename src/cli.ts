@@ -8,6 +8,7 @@
 
 import { Command } from "commander";
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 
@@ -119,6 +120,17 @@ function setEnvFromOptions(options: CliOptions): NodeJS.ProcessEnv {
     options.presentationAuthorizeScript,
   );
   applyEnvOption(env, "CONFIG_CREDENTIAL_TYPES", options.credentialTypes);
+  applyEnvOption(env, "CONFIG_ECOSYSTEM", options.ecosystem);
+  applyEnvOption(
+    env,
+    "CONFIG_AUTHORIZATION_INTERACTION",
+    options.authorizationInteraction,
+  );
+  applyEnvOption(
+    env,
+    "CONFIG_CLIENT_AUTHENTICATION",
+    options.clientAuthentication,
+  );
   applyEnvOption(env, "CONFIG_TIMEOUT", options.timeout);
   applyEnvOption(env, "CONFIG_MAX_RETRIES", options.maxRetries);
   applyEnvOption(env, "CONFIG_LOG_LEVEL", options.logLevel);
@@ -174,6 +186,18 @@ function addCommonOptions(command: Command): Command {
     .option(
       "--file-ini <path>",
       "Path to custom INI configuration file (env: CONFIG_FILE_INI)",
+    )
+    .option(
+      "--ecosystem <profile>",
+      "Target profile: it_wallet or generic_oid4vci (env: CONFIG_ECOSYSTEM)",
+    )
+    .option(
+      "--authorization-interaction <mode>",
+      "Authorization mode: auto, browser_redirect, credential_presentation (env: CONFIG_AUTHORIZATION_INTERACTION)",
+    )
+    .option(
+      "--client-authentication <method>",
+      "Client authentication: auto, attest_jwt_client_auth, private_key_jwt (env: CONFIG_CLIENT_AUTHENTICATION)",
     )
     .option(
       "--credential-issuer-uri <uri>",
@@ -303,6 +327,93 @@ report
   .action(async () => {
     const { reportList } = await import("@/report/commands/report-list");
     reportList();
+  });
+
+program
+  .command("inspect:issuer")
+  .description(
+    "Inspect an issuer for generic OID4VCI interoperability; this does not claim conformance",
+  )
+  .option("--credential-issuer-uri <uri>")
+  .option("--credential-offer-uri <uri>")
+  .option("--write-config <path>")
+  .action(async (options) => {
+    if (!options.credentialIssuerUri && !options.credentialOfferUri) {
+      throw new Error(
+        "Specify --credential-issuer-uri or --credential-offer-uri",
+      );
+    }
+    const { loadConfigWithHierarchy } = await import("@/logic/config-loader");
+    const { parseCredentialOfferContext } =
+      await import("@/logic/credential-offer");
+    const { discoverGenericIssuer } =
+      await import("@/logic/generic-issuer-discovery");
+    const config = loadConfigWithHierarchy();
+    let credentialIssuer = options.credentialIssuerUri as string | undefined;
+    let offerIds: string[] | undefined;
+    if (options.credentialOfferUri) {
+      const { resolveCredentialOffer } =
+        await import("@pagopa/io-wallet-oid4vci");
+      const { IoWalletSdkConfig } = await import("@pagopa/io-wallet-utils");
+      const offer = parseCredentialOfferContext(
+        await resolveCredentialOffer({
+          callbacks: { fetch },
+          config: new IoWalletSdkConfig({
+            itWalletSpecsVersion: config.wallet.wallet_version,
+          }),
+          credentialOffer: options.credentialOfferUri,
+        }),
+      );
+      credentialIssuer = offer.credential_issuer;
+      offerIds = offer.credential_configuration_ids;
+    }
+    if (!credentialIssuer) {
+      throw new Error("Credential offer did not contain credential_issuer");
+    }
+    const discovery = await discoverGenericIssuer(
+      credentialIssuer,
+      config.network,
+    );
+    const ids =
+      offerIds ??
+      Object.keys(
+        discovery.credentialIssuerMetadata.credential_configurations_supported,
+      );
+    const summary = {
+      authorizationServer: discovery.authorizationServer,
+      clientAuthenticationMethods:
+        discovery.authorizationServerMetadata
+          .token_endpoint_auth_methods_supported ?? [],
+      compatibleProfiles: ["generic_oid4vci"],
+      credentialConfigurations: ids,
+      credentialIssuer: discovery.credentialIssuer,
+      discoveryMethod: discovery.discoveryMethod,
+      italianRequirements:
+        "Not assessed; generic interoperability is not an Italian IT Wallet conformance result.",
+    };
+    process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+    if (options.writeConfig) {
+      const configText = [
+        "; Generated from an issuer metadata snapshot. No secrets or trust anchors are included.",
+        "; Generic interoperability success is not an Italian IT Wallet conformance result.",
+        "[profile]",
+        "ecosystem = generic_oid4vci",
+        "",
+        "[issuance]",
+        `url = ${discovery.credentialIssuer}`,
+        ...ids.map((id) => `credential_types[] = ${id}`),
+        "; Inferred from authorization-code issuer capabilities; change only with target documentation.",
+        "authorization_interaction = browser_redirect",
+        "; User must provide compatible wallet keys/attestation material separately.",
+        "client_authentication = auto",
+        "",
+      ].join("\n");
+      writeFileSync(
+        resolve(process.cwd(), options.writeConfig),
+        configText,
+        "utf8",
+      );
+    }
   });
 
 report

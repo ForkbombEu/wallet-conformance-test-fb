@@ -1,5 +1,6 @@
 import { fetchMetadata } from "@pagopa/io-wallet-oid4vci";
 
+import { discoverGenericIssuer } from "@/logic/generic-issuer-discovery";
 import { fetchWithConfig } from "@/logic/utils";
 import { recordSessionEntityNameFromEntityConfiguration } from "@/report/session-runtime";
 
@@ -9,6 +10,7 @@ export interface FetchMetadataExecuteResponse {
   discoveredVia?: "federation" | "oid4vci";
   // Entity statement metadata is version-dependent and consumed structurally by orchestrators/tests.
   entityStatementClaims?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  issuerDiscovery?: import("@/logic/generic-issuer-discovery").IssuerDiscoveryResult;
   status: number;
 }
 
@@ -41,6 +43,16 @@ export class FetchMetadataDefaultStep extends StepFlow {
     log.info("Discovering metadata...");
 
     return this.execute<FetchMetadataExecuteResponse>(async () => {
+      if (this.config.profile.ecosystem === "generic_oid4vci") {
+        const issuerDiscovery = await discoverGenericIssuer(
+          options.baseUrl,
+          this.config.network,
+        );
+        log.info(
+          `Generic OID4VCI discovery completed via ${issuerDiscovery.discoveryMethod}`,
+        );
+        return { issuerDiscovery, status: 200 };
+      }
       const result = await fetchMetadata({
         callbacks: {
           fetch: fetchWithConfig(this.config.network),

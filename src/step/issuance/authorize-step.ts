@@ -37,6 +37,10 @@ export interface AuthorizeStepOptions {
    * Authorization Endpoint URL
    */
   authorizationEndpoint: string;
+  authorizationInteraction?:
+    | "auto"
+    | "browser_redirect"
+    | "credential_presentation";
 
   /**
    * Issuer Base URL
@@ -280,7 +284,17 @@ export class AuthorizeDefaultStep extends StepFlow {
       `&request_uri=${encodeURIComponent(options.requestUri ?? "")}`;
 
     return this.execute<AuthorizeExecuteResponse>(async () => {
-      if (options.credentialIdentifier === "dc_sd_jwt_pid") {
+      const interaction =
+        options.authorizationInteraction ??
+        this.config.issuance.authorization_interaction;
+      const useBrowserRedirect =
+        interaction === "browser_redirect" ||
+        (interaction === "auto" &&
+          this.config.profile.ecosystem === "it_wallet");
+      this.log.info(
+        `Authorization interaction: ${useBrowserRedirect ? "browser_redirect" : "credential_presentation"}`,
+      );
+      if (useBrowserRedirect) {
         return this.handlePidFlow({
           authorizeUrl,
           callbackPort,

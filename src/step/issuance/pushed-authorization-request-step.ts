@@ -51,6 +51,9 @@ export interface PushedAuthorizationRequestStepOptions {
    */
   credentialConfigurationIds: string[];
 
+  /** Offer-bound state forwarded unchanged for an authorization-code offer. */
+  issuerState?: string;
+
   /**
    * DPoP JWT used to authenticate the client, it will be created using the wallet attestation
    */
@@ -125,6 +128,7 @@ export class PushedAuthorizationRequestDefaultStep extends StepFlow {
             this.config.issuance.callback_port,
           ),
           responseMode: "query",
+          ...(options.issuerState && { issuer_state: options.issuerState }),
           state,
         };
 

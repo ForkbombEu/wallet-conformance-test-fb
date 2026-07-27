@@ -566,3 +566,10 @@ Contributions are what make the open-source community such an amazing place to l
 5. Open a Pull Request
 
 Please see the CONTRIBUTING.md file for more details on our code of conduct and the process for submitting pull requests.
+# Profiles and interoperability
+
+`[profile] ecosystem = it_wallet` is the default and keeps the existing strict Italian OpenID Federation and Wallet requirements. `generic_oid4vci` performs standards-based issuer discovery for interoperability testing and is intentionally separate from Italian conformance.
+
+Use `wct inspect:issuer --credential-issuer-uri https://issuer.example` (or `--credential-offer-uri`) to inspect metadata, or add `--write-config config.generated.ini` for a secret-free starting configuration. Generic flows may be configured with `authorization_interaction = browser_redirect` and `client_authentication = auto` under `[issuance]`.
+
+**Generic interoperability success is not an Italian IT Wallet conformance result.**

@@ -1,5 +1,6 @@
 export * from "./callback-server";
 export * from "./config-loader";
+export * from "./credential-offer";
 export * from "./entrypoint";
 export * from "./federation-metadata";
 export * from "./jwk";

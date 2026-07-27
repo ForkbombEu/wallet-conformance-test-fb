@@ -24,11 +24,14 @@ import { deepMerge } from "./utils";
  */
 export interface CliOptions {
   [key: string]: boolean | number | string | undefined;
+  authorizationInteraction?: string;
   bindAddress?: string;
+  clientAuthentication?: string;
   credentialConfigurationIdReissuance?: string;
   credentialIssuerUri?: string;
   credentialOfferUri?: string;
   credentialTypes?: string;
+  ecosystem?: string;
   fileIni?: string;
   issuanceCertificateSubject?: string;
   issuanceTestsDir?: string;
@@ -209,6 +212,7 @@ function cliOptionsToConfig(options: CliOptions): Partial<Config> {
   const trustAnchor = buildTrustAnchorConfig(options);
   const stepsMapping = buildStepsMappingConfig(options);
   const wallet = buildWalletConfig(options);
+  const profile = buildProfileConfig(options);
 
   if (hasConfigValues<Config["issuance"]>(issuance)) {
     partialConfig.issuance = issuance as Config["issuance"];
@@ -230,6 +234,9 @@ function cliOptionsToConfig(options: CliOptions): Partial<Config> {
   }
   if (hasConfigValues<Config["wallet"]>(wallet)) {
     partialConfig.wallet = wallet as Config["wallet"];
+  }
+  if (hasConfigValues<Config["profile"]>(profile)) {
+    partialConfig.profile = profile as Config["profile"];
   }
 
   return partialConfig;
@@ -355,6 +362,14 @@ function normalizeTestPaths<TConfig extends Partial<Config>>(
 const buildIssuanceConfig: ConfigSectionBuilder<Config["issuance"]> = (
   options,
 ) => ({
+  ...(options.authorizationInteraction && {
+    authorization_interaction:
+      options.authorizationInteraction as Config["issuance"]["authorization_interaction"],
+  }),
+  ...(options.clientAuthentication && {
+    client_authentication:
+      options.clientAuthentication as Config["issuance"]["client_authentication"],
+  }),
   ...(options.credentialIssuerUri && { url: options.credentialIssuerUri }),
   ...(options.credentialOfferUri && {
     credential_offer_uri: options.credentialOfferUri,
@@ -384,6 +399,14 @@ const buildIssuanceConfig: ConfigSectionBuilder<Config["issuance"]> = (
   ...(options.issuanceTestsDir && { tests_dir: options.issuanceTestsDir }),
   ...(options.issuanceCertificateSubject && {
     certificate_subject: options.issuanceCertificateSubject,
+  }),
+});
+
+const buildProfileConfig: ConfigSectionBuilder<Config["profile"]> = (
+  options,
+) => ({
+  ...(options.ecosystem && {
+    ecosystem: options.ecosystem as Config["profile"]["ecosystem"],
   }),
 });
 
@@ -541,6 +564,17 @@ function readCliOptionsFromEnv(): CliOptions {
     "CONFIG_PRESENTATION_AUTHORIZE_SCRIPT",
   );
   readStringEnv(options, "credentialTypes", "CONFIG_CREDENTIAL_TYPES");
+  readStringEnv(options, "ecosystem", "CONFIG_ECOSYSTEM");
+  readStringEnv(
+    options,
+    "authorizationInteraction",
+    "CONFIG_AUTHORIZATION_INTERACTION",
+  );
+  readStringEnv(
+    options,
+    "clientAuthentication",
+    "CONFIG_CLIENT_AUTHENTICATION",
+  );
   readNumberEnv(options, "timeout", "CONFIG_TIMEOUT");
   readNumberEnv(options, "maxRetries", "CONFIG_MAX_RETRIES");
   readStringEnv(options, "logLevel", "CONFIG_LOG_LEVEL");

@@ -1,0 +1,757 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://credimi.io/schemas/conformance-result.v1.1.json",
+  "title": "Credimi Conformance Result",
+  "description": "Normalized reviewer-facing conformance/evidence result. v1.1 rationalizes source scope and adds EUDI-targeted OpenID Conformance Suite spec-link support without importing non-EUDI FAPI/regional profiles.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profile_slug",
+    "run",
+    "target",
+    "evidence_claim_results",
+    "raw_evidence_refs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.1"
+    },
+    "registry_version": {
+      "type": "string"
+    },
+    "profile_slug": {
+      "type": "string"
+    },
+    "profile_title": {
+      "type": "string"
+    },
+    "overall_result": {
+      "$ref": "#/$defs/result"
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "workflow_id",
+        "workflow_run_id",
+        "started_at",
+        "overall_result"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflow_run_id": {
+          "type": "string"
+        },
+        "pipeline_id": {
+          "type": "string"
+        },
+        "pipeline_version": {
+          "type": "string"
+        },
+        "pipeline_name": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "overall_result": {
+          "$ref": "#/$defs/result"
+        },
+        "temporal_namespace": {
+          "type": "string"
+        },
+        "temporal_task_queue": {
+          "type": "string"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "actor_type",
+        "actor_name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "actor_type": {
+          "type": "string",
+          "enum": [
+            "wallet",
+            "issuer",
+            "attestation_provider",
+            "pid_provider",
+            "relying_party",
+            "verifier",
+            "trust_infrastructure",
+            "third_party_test_suite",
+            "other"
+          ]
+        },
+        "actor_name": {
+          "type": "string"
+        },
+        "actor_version": {
+          "type": "string"
+        },
+        "wallet_package_or_identifier": {
+          "type": "string"
+        },
+        "wallet_version": {
+          "type": "string"
+        },
+        "issuer_identifier": {
+          "type": "string"
+        },
+        "issuer_metadata_snapshot_ref": {
+          "type": "string"
+        },
+        "rp_identifier": {
+          "type": "string"
+        },
+        "rp_metadata_snapshot_ref": {
+          "type": "string"
+        },
+        "external_suite_name": {
+          "type": "string"
+        },
+        "external_suite_version": {
+          "type": "string"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runner_id": {
+          "type": "string"
+        },
+        "runner_namespace": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "device_model": {
+          "type": "string"
+        },
+        "os_name": {
+          "type": "string"
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "android_package": {
+          "type": "string"
+        },
+        "app_version": {
+          "type": "string"
+        },
+        "commit_sha": {
+          "type": "string"
+        },
+        "ci_provider": {
+          "type": "string"
+        },
+        "ci_run_id": {
+          "type": "string"
+        },
+        "disable_android_play_store": {
+          "type": "boolean"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "evidence_claim_results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/evidence_claim_result"
+      }
+    },
+    "raw_evidence_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "temporal_input_ref": {
+          "type": "string"
+        },
+        "temporal_output_ref": {
+          "type": "string"
+        },
+        "step_input_output_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "video_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "screenshot_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "http_trace_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "external_test_output_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pdf_report_ref": {
+          "type": "string"
+        }
+      }
+    },
+    "hash_manifest": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/hash_entry"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "conformance_context": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Normalized metadata passed through Temporal but not necessarily consumed by the underlying test action."
+    },
+    "source_scope_version": {
+      "type": "string",
+      "description": "Source-scope policy version, e.g. 1.1."
+    }
+  },
+  "$defs": {
+    "result": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail",
+        "warning",
+        "not_tested",
+        "manual_review",
+        "inconclusive",
+        "partial"
+      ]
+    },
+    "evidence_claim_result": {
+      "type": "object",
+      "required": [
+        "slug",
+        "title",
+        "result",
+        "evidence_type",
+        "evidence_artifacts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "title": {
+          "type": "string"
+        },
+        "internal_id": {
+          "type": "string"
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        },
+        "official_references": {
+          "$ref": "#/$defs/official_references"
+        },
+        "evidence_type": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "behavioral_black_box",
+              "protocol_trace",
+              "third_party_result",
+              "trust_resolution",
+              "assurance_documentation",
+              "manual_attestation",
+              "standards_validation"
+            ]
+          }
+        },
+        "evidence_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_artifact"
+          }
+        },
+        "evidence_contributions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_contribution"
+          }
+        },
+        "observed_outputs": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "expected_outputs": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "official_references": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "legal": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/legal_ref"
+          }
+        },
+        "arf": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/arf_ref"
+          }
+        },
+        "webuild": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/webuild_ref"
+          }
+        },
+        "etsi": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/etsi_ref"
+          }
+        },
+        "openid": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/openid_ref"
+          }
+        },
+        "iso": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/iso_ref"
+          }
+        },
+        "ietf": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/generic_protocol_ref"
+          }
+        },
+        "oauth": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/generic_protocol_ref"
+          }
+        },
+        "oidc": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/generic_protocol_ref"
+          }
+        }
+      }
+    },
+    "legal_ref": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "article": {
+          "type": "string"
+        },
+        "recital_or_article": {
+          "type": "string"
+        },
+        "annex": {
+          "type": "string"
+        },
+        "short": {
+          "type": "string"
+        }
+      }
+    },
+    "arf_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "harmonized_id": {
+          "type": "string"
+        },
+        "index": {
+          "type": "string"
+        },
+        "short": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "section_url": {
+          "type": "string"
+        },
+        "category_url": {
+          "type": "string"
+        },
+        "csv_url": {
+          "type": "string"
+        },
+        "topic": {
+          "type": "string"
+        },
+        "topic_number": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "part": {
+          "type": "string"
+        }
+      }
+    },
+    "webuild_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "use_case_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence_contribution": {
+      "type": "object",
+      "required": [
+        "step_id",
+        "contribution_level",
+        "evidence_type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "step_id": {
+          "type": "string"
+        },
+        "step_name": {
+          "type": "string"
+        },
+        "step_kind": {
+          "type": "string",
+          "enum": [
+            "maestro",
+            "stepci",
+            "external_conformance_test",
+            "trust_helper",
+            "manual",
+            "other",
+            "standards_validator",
+            "etsi_profile_check"
+          ]
+        },
+        "contribution_level": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "full",
+            "supporting",
+            "manual_review"
+          ]
+        },
+        "evidence_type": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        }
+      }
+    },
+    "evidence_artifact": {
+      "type": "object",
+      "required": [
+        "type",
+        "ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "credential_offer",
+            "presentation_request",
+            "issuer_metadata_snapshot",
+            "rp_metadata_snapshot",
+            "maestro_flow_output",
+            "test_run_url",
+            "video",
+            "screenshot",
+            "temporal_workflow",
+            "temporal_input",
+            "temporal_output",
+            "step_input_output",
+            "verifier_callback",
+            "external_test_result",
+            "trust_resolution_result",
+            "certificate_validation_result",
+            "revocation_result",
+            "entitlement_result",
+            "hash_manifest",
+            "pdf_report",
+            "other",
+            "etsi_standard_reference",
+            "standards_profile_validation_result",
+            "etsi_profile_validation_result",
+            "certificate_profile_validation_result",
+            "timestamp_validation_result",
+            "validation_service_result",
+            "signature_validation_result",
+            "timestamp_token",
+            "remote_signature_service_result",
+            "assert_visible_result",
+            "siopv2_request",
+            "id_token_validation_result",
+            "device_engagement_data",
+            "mdoc_response",
+            "trust_chain_validation_result",
+            "trust_mark_validation_result"
+          ]
+        },
+        "ref": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": {
+          "type": "string"
+        },
+        "assert_visible": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Maestro assertVisible command and matched selector/text associated with a screenshot."
+        }
+      }
+    },
+    "hash_entry": {
+      "type": "object",
+      "required": [
+        "ref",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "algorithm": {
+          "type": "string",
+          "const": "sha256"
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "etsi_ref": {
+      "type": "object",
+      "required": [
+        "source",
+        "id",
+        "deliverable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "const": "ETSI"
+        },
+        "id": {
+          "type": "string"
+        },
+        "deliverable": {
+          "type": "string"
+        },
+        "short": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "pdf_url": {
+          "type": "string"
+        },
+        "relevance": {
+          "type": "string"
+        }
+      }
+    },
+    "openid_ref": {
+      "type": "object",
+      "required": [
+        "reference_type",
+        "id",
+        "document_name"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "reference_type": {
+          "type": "string",
+          "const": "openid_profile"
+        },
+        "id": {
+          "type": "string"
+        },
+        "document_name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "paragraph": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "iso_ref": {
+      "type": "object",
+      "required": [
+        "source",
+        "document_name"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "document_name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "paragraph": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "generic_protocol_ref": {
+      "type": "object",
+      "required": [
+        "reference_type",
+        "id",
+        "document_name"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "reference_type": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "document_name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "paragraph": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "scope_status": {
+          "type": "string",
+          "enum": [
+            "core",
+            "supporting_if_used",
+            "reference_only",
+            "excluded"
+          ]
+        }
+      }
+    }
+  }
+}

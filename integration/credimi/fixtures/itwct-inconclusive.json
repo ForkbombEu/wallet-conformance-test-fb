@@ -1,0 +1,68 @@
+{
+  "contract_version": "1.0",
+  "run_id": "11111111-1111-4111-8111-111111111111",
+  "profile_id": "wallet-presentation-dev",
+  "category": "presentation",
+  "engine": {
+    "id": "pagopa-itwct",
+    "upstream_repository": "https://github.com/pagopa/itw-conformance-tool",
+    "fork_repository": "https://github.com/ForkbombEu/itw-conformance-tool",
+    "version": "synthetic-fixture",
+    "revision": "550266b3541329644100eb9917687394da8e23f3"
+  },
+  "execution": {
+    "status": "completed",
+    "started_at": "2026-10-26T12:00:00Z",
+    "finished_at": "2026-10-26T12:00:02Z",
+    "exit_code": 1
+  },
+  "selection": {
+    "ids": [
+      "WP_RP_HAPPY"
+    ]
+  },
+  "target": {
+    "actor_type": "wallet",
+    "actor_name": "Synthetic wallet",
+    "actor_version": "fixture"
+  },
+  "native": {
+    "sessions": [
+      {
+        "id": "synthetic-native-session",
+        "status": "FAILED"
+      }
+    ],
+    "assertions": [
+      {
+        "assertion_id": "fixture-assertion-1",
+        "requirement_id": "WP_082",
+        "full_title": "[WP_082]: Synthetic fixture assertion",
+        "ancestor_titles": [
+          "Synthetic fixture"
+        ],
+        "file": "synthetic.test.ts",
+        "phase": "presentation",
+        "native_status": "FAIL"
+      }
+    ],
+    "scenario_outcomes": [
+      {
+        "scenario_id": "WP_RP_HAPPY",
+        "correlation_id": "synthetic-correlation",
+        "verdict": "INCONCLUSIVE"
+      }
+    ],
+    "native_suite_status": "FAILED",
+    "coverage_mode": "it_wallet_profile"
+  },
+  "summary": {
+    "result": "inconclusive",
+    "assertion_count": 1,
+    "native_failed_assertion_count": 1
+  },
+  "artifacts": [],
+  "limitations": [
+    "Synthetic fixture; not a conformance execution."
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.1",
+  "registry_version": "1.1",
+  "profile_slug": "third-party-conformance-ingestion",
+  "profile_title": "PagoPA external test result ingestion",
+  "overall_result": "fail",
+  "run": {
+    "workflow_id": "synthetic-workflow",
+    "workflow_run_id": "synthetic-temporal-run",
+    "started_at": "2026-10-26T12:00:00Z",
+    "finished_at": "2026-10-26T12:00:02Z",
+    "overall_result": "fail"
+  },
+  "target": {
+    "actor_type": "wallet",
+    "actor_name": "Synthetic wallet",
+    "external_suite_name": "pagopa-itwct",
+    "external_suite_version": "synthetic-fixture"
+  },
+  "environment": {
+    "metadata": {
+      "external_engine_revision": "550266b3541329644100eb9917687394da8e23f3",
+      "coverage_mode": "it_wallet_profile"
+    }
+  },
+  "evidence_claim_results": [
+    {
+      "slug": "external-conformance-test-result-ingested",
+      "title": "External conformance test result is ingested and mapped",
+      "internal_id": "credimi.evidence.external.conformance_result_ingested_and_mapped.v1",
+      "result": "pass",
+      "evidence_type": [
+        "third_party_result"
+      ],
+      "evidence_artifacts": [
+        {
+          "type": "external_test_result",
+          "ref": "artifact:synthetic/native-results.json",
+          "sha256": "b6212cd444fdc25c534f213d90f30658fe6bf22176d4ada65e62f73f8b2fbafc",
+          "mime_type": "application/json"
+        }
+      ],
+      "observed_outputs": {
+        "native_suite_status": "FAILED",
+        "native_failed_assertion_count": 1,
+        "mapping_status": "unmapped"
+      },
+      "limitations": [
+        "Ingestion succeeded. The external test result failed. No normative assertion mapping was applied."
+      ]
+    }
+  ],
+  "raw_evidence_refs": {
+    "external_test_output_refs": [
+      "artifact:synthetic/native-results.json"
+    ]
+  },
+  "hash_manifest": [
+    {
+      "ref": "artifact:synthetic/native-results.json",
+      "sha256": "b6212cd444fdc25c534f213d90f30658fe6bf22176d4ada65e62f73f8b2fbafc",
+      "algorithm": "sha256",
+      "mime_type": "application/json"
+    }
+  ],
+  "limitations": [
+    "Synthetic example only. This document is not test evidence or certification."
+  ],
+  "source_scope_version": "1.1"
+}

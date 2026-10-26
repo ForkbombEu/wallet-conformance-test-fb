@@ -1,0 +1,2558 @@
+version: '1.1'
+name: Credimi Conformance Aggregation Taxonomy
+purpose: Machine-readable taxonomy for mapping a small number of aggregated Credimi pipeline patterns to many flat conformance
+  tests and evidence claims. Designed for Credimi execution logic, not for human certification claims.
+design_principles:
+- Do not unroll every possible credential/profile/algorithm combination as separate static tests unless necessary.
+- Use aggregated test templates plus metadata-driven coverage rules.
+- Treat Maestro success as definitive only for observable behaviour; treat internal crypto/storage claims as conditional unless
+  strengthened by verifier-side, negative-fixture, headless or external tests.
+- Keep the flat test list as the atomic evidence/test vocabulary.
+- Keep the evidence registry as the legal/ARF/WE BUILD/ETSI reference vocabulary.
+- Use conformance_context artifacts passed through Temporal as the bridge between protocol metadata and Wallet black-box behaviour.
+source_inputs:
+  flat_test_list: credimi-flat-conformance-test-list-v0.2-with-references.md
+  evidence_registry: credimi-conformance-evidence-registry-v0.9.yaml
+  schema: credimi-conformance-result.schema.v0.4.json
+result_strength_vocabulary:
+  definitive: The aggregated pipeline directly proves the observable claim.
+  conditional: The aggregated pipeline supports the claim, but proof depends on chained validation, verifier-side inspection,
+    negative fixtures, headless tests, or external evidence.
+  requires_external: Cannot be proven by Credimi black-box pipeline alone.
+support_vocabulary:
+  supported_native: 'Can run with current/near-current Credimi primitives: StepCI, Maestro, Temporal, screenshots/videos and
+    result aggregation.'
+  credimi_upcoming: Should become a Credimi helper, adapter or profile validator.
+  third_party: Requires external conformance suite, validation service, QTSP, CAB/lab, or manual review.
+  manual_review: Requires human/CAB/compliance review.
+core_runtime_objects:
+  credential_offer:
+    description: The concrete credential offer/deeplink consumed by the Wallet.
+    temporal_role: Recorded as StepCI output and Maestro input.
+    evidence_use: Binds the Wallet action to a concrete issuance session.
+  credential_metadata:
+    description: Normalized metadata extracted from credential offer and issuer .well-known metadata.
+    temporal_role: Passed in conformance_context to the Maestro step, even if Maestro ignores it.
+    evidence_use: Allows Credimi to infer which credential profile/format/grant/signing/trust properties were tested by the
+      successful Wallet action.
+    recommended_location: payload.conformance_context.credential_metadata
+  presentation_metadata:
+    description: Normalized metadata extracted from presentation request, RP cert/register data and verifier config.
+    temporal_role: Passed in conformance_context to the Maestro presentation step.
+    evidence_use: Allows Credimi to infer which RP/request/attribute/presentation profile was tested.
+  trust_resolution_result:
+    description: Output of trust-helper checks for lists, registers, certificates, revocation, status and entitlements.
+    temporal_role: Recorded as trust-helper step output or conformance_context for downstream steps.
+    evidence_use: Turns protocol/UX events into trust-resolved evidence.
+metadata_dimensions:
+  credential_profile:
+  - PID
+  - EAA
+  - QEAA
+  - QEEA
+  - PUB_EAA
+  - OTHER
+  credential_format:
+  - SD_JWT
+  - MDOC
+  - W3C_VC_JWT
+  - W3C_VC_DI
+  - OTHER
+  grant_type:
+  - authorization_code
+  - pre-authorized_code
+  - other
+  issuer_binding:
+  - x5c
+  - x509
+  - jwk
+  - did
+  - trusted_list_entry
+  - other
+  signing_algorithm_family:
+  - RSA
+  - ECDSA
+  - EdDSA
+  - other
+  signing_algorithm:
+  - RS256
+  - PS256
+  - ES256
+  - EdDSA
+  - other
+  key_strength:
+  - RSA_2048
+  - RSA_3072
+  - P256
+  - Ed25519
+  - unknown
+  status_mechanism:
+  - status_list
+  - ocsp
+  - crl
+  - issuer_status_endpoint
+  - none
+  - unknown
+  trust_mode:
+  - production
+  - pilot
+  - sandbox
+  - mock
+  - unknown
+  rp_auth_material:
+  - rp_access_certificate
+  - rp_registration_certificate
+  - register_entry
+  - none
+  - unknown
+  presentation_profile:
+  - OpenID4VP
+  - same_device
+  - cross_device_qr
+  - other
+  siopv2_flow_type:
+  - same_device
+  - cross_device
+  - request_uri
+  - direct_post
+  - authorization_code
+  - id_token
+  mdoc_transport:
+  - ble
+  - nfc
+  - wifi_aware
+  - online_retrieval
+  - qr
+  - unknown
+  federation_trust_material:
+  - entity_configuration
+  - subordinate_statement
+  - trust_chain
+  - metadata_policy
+  - trust_mark
+  - resolve_response
+  - unknown
+aggregated_test_templates:
+- template_id: agg-issuance-positive-profile
+  title: Positive issuance profile test
+  actor_scope:
+  - wallet
+  - issuer
+  - attestation_provider
+  objective: Obtain a credential offer, resolve credential metadata, and prove that a real Wallet can complete issuance for
+    that metadata profile.
+  recommended_execution:
+    primary_mode: stepci-metadata-plus-maestro
+    credimi_support: supported_native
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: get-offer-a-for-metadata
+    kind: stepci
+    purpose: Fetch credential offer or equivalent issuer trigger used to derive metadata.
+    outputs:
+    - credential_offer_a
+  - step_id: resolve-credential-metadata
+    kind: metadata-helper
+    purpose: Parse credential offer, fetch issuer .well-known, resolve credential configuration and produce credential_metadata.
+    inputs:
+    - credential_offer_a
+    outputs:
+    - credential_metadata
+    - issuer_metadata_snapshot
+    - issuer_metadata_hash
+  - step_id: get-offer-b-for-wallet
+    kind: stepci
+    purpose: Fetch fresh credential offer for Wallet consumption if offers are single-use.
+    outputs:
+    - credential_offer_b
+  - step_id: offer-consistency-check
+    kind: metadata-helper
+    purpose: Check Offer A/B equivalence by credential_id, issuer, configuration ID, grant type and issuer metadata hash.
+    inputs:
+    - credential_offer_a
+    - credential_offer_b
+    - credential_metadata
+    outputs:
+    - offer_consistency_result
+  - step_id: wallet-get-credential
+    kind: maestro
+    purpose: Real Wallet consumes credential_offer_b and completes issuance.
+    inputs:
+    - credential_offer_b
+    - conformance_context.credential_metadata
+    outputs:
+    - maestro_flow_output
+    - screenshots
+    - video
+    - test_run_url
+  input_requirements:
+    required:
+    - credential_id
+    - credential_offer
+    - issuer_metadata_snapshot
+    - credential_metadata
+    recommended_credential_metadata_fields:
+    - credential_issuer
+    - credential_configuration_ids
+    - credential_profile
+    - credential_format
+    - grant_types
+    - issuer_binding
+    - signing_algorithms
+    - key_strength
+    - issuer_metadata_sha256
+    - fetched_at
+    - trust_mode
+  emits_flat_tests:
+  - test_no: 1
+    when: credential_profile == PID
+    strength: definitive
+  - test_no: 2
+    when: credential_profile == EAA
+    strength: definitive
+  - test_no: 3
+    when: credential_profile in [QEAA,QEEA]
+    strength: conditional
+  - test_no: 4
+    when: grant_type == authorization_code
+    strength: definitive
+  - test_no: 5
+    when: grant_type == pre-authorized_code
+    strength: definitive
+  - test_no: 6
+    when: credential_profile == PID and credential_format == SD_JWT
+    strength: definitive
+  - test_no: 7
+    when: credential_profile == PID and credential_format == MDOC
+    strength: definitive
+  - test_no: 8
+    when: credential_profile == EAA and credential_format == SD_JWT
+    strength: definitive
+  - test_no: 9
+    when: credential_profile == EAA and credential_format == MDOC
+    strength: definitive
+  - test_no: 10
+    when: signing_algorithm_family == RSA and key_strength == RSA_2048
+    strength: definitive_for_issuance_completion
+  - test_no: 11
+    when: signing_algorithm in [ES256] or key_strength == P256
+    strength: definitive_for_issuance_completion
+  - test_no: 12
+    when: signing_algorithm in [EdDSA] or key_strength == Ed25519
+    strength: definitive_for_issuance_completion
+  - test_no: 13
+    when: issuer_binding in [x5c,x509]
+    strength: definitive_for_issuance_completion
+  - test_no: 14
+    when: issuer_binding in [jwk,did]
+    strength: definitive_for_issuance_completion
+  - test_no: 15
+    when: maestro asserts credential visible after issuance
+    strength: definitive
+  - test_no: 66
+    when: issuer metadata fetched
+    strength: definitive
+  - test_no: 67
+    when: metadata schema validation enabled
+    strength: definitive
+  - test_no: 68
+    when: credential_profile == PID
+    strength: definitive
+  - test_no: 69
+    when: credential_profile in [EAA,QEAA,QEEA,PUB_EAA]
+    strength: definitive
+  - test_no: 70
+    when: credential_format == SD_JWT
+    strength: definitive
+  - test_no: 71
+    when: credential_format == MDOC
+    strength: definitive
+  - test_no: 72
+    when: signing_algorithms present in metadata
+    strength: definitive
+  - test_no: 73
+    when: issuer_binding in [x5c,x509]
+    strength: definitive
+  - test_no: 74
+    when: issuer_binding in [jwk,did]
+    strength: definitive
+  - test_no: 75
+    when: credential offer syntax validated
+    strength: definitive
+  - test_no: 76
+    when: offer issuer matches metadata issuer
+    strength: definitive
+  - test_no: 77
+    when: offer configuration id exists in metadata
+    strength: definitive
+  - test_no: 78
+    when: grant_type == authorization_code
+    strength: definitive
+  - test_no: 79
+    when: grant_type == pre-authorized_code
+    strength: definitive
+  - test_no: 80
+    when: two-offer pattern used
+    strength: definitive
+  - test_no: 81
+    when: credential_profile == PID and Wallet issuance succeeds
+    strength: definitive
+  - test_no: 82
+    when: credential_profile in [EAA,QEAA,QEEA] and Wallet issuance succeeds
+    strength: definitive_for_interop
+  - test_no: 83
+    when: credential_profile in [QEAA,QEEA]
+    strength: conditional
+  - test_no: 102
+    when: ETSI issuance profile helper enabled
+    strength: conditional
+  emits_evidence_claims:
+  - wallet-receives-pid-eaa-issuance-request
+  - wallet-completes-pid-eaa-issuance
+  - pid-provider-issues-pid-to-wallet
+  - eaa-provider-issues-eaa-to-wallet
+  - eaa-pid-issuance-profile-validation
+  coverage_rules:
+  - rule_id: issuance-success-does-not-prove-wallet-crypto-rejection
+    if: wallet-get-credential.result == pass
+    then: Do not emit definitive evidence for Wallet signature verification. Emit conditional evidence only unless negative
+      crypto fixtures or verifier-side inspection are also present.
+  - rule_id: two-offer-consistency
+    if: get-offer-a-for-metadata and get-offer-b-for-wallet are both present
+    then: Require same credential_id, same credential_issuer, same credential_configuration_ids, same grant type and compatible
+      issuer metadata hash.
+  evidence_artifacts:
+  - credential_offer_a
+  - credential_offer_b
+  - credential_metadata
+  - issuer_metadata_snapshot
+  - issuer_metadata_hash
+  - offer_consistency_result
+  - maestro_flow_output
+  - screenshots
+  - video
+  - temporal_activity_inputs_outputs
+  notes:
+  - This is the highest-ROI aggregation pattern. It turns one simple issuance pipeline into many Wallet and Issuer evidence
+    results.
+  - The claim about RSA-2048/ES256/EdDSA is definitive only for successful completion under that advertised metadata profile,
+    not for negative crypto-verification behaviour.
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 4
+    notes: Issuance of PID and EAAs to wallet units.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 3
+    notes: Issuance of person identification data to wallet units.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 4
+    notes: Issuance of electronic attestations of attributes to wallet units.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-003
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_03
+    paragraph: OIA_03
+    notes: Required protocol standards for issuing, presenting, verifying attestations.
+  - reference_type: arf_requirement
+    id: AS-AP-10-029
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=ISSU_22
+    paragraph: ISSU_22
+    notes: Credential Issuer metadata signing / issuer metadata evidence.
+  - reference_type: arf_requirement
+    id: AS-AP-10-048
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=ISSU_32
+    paragraph: ISSU_32
+    notes: Attestation Provider metadata signing / issuer metadata evidence.
+  - reference_type: webuild_working_document
+    id: UC-TE-02
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Wallet Unit Evaluates Credential Issuer
+    notes: task1-use-cases/subtask1-2-trust-registry/wallet-unit-evaluates-credential-issuer.md
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-472-3-V1-1-1
+    document_name: ETSI TS 119 472-3 V1.1.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11947203/01.01.01_60/ts_11947203v010101p.pdf
+    paragraph: TS 119 472-3
+    notes: Profiles for issuing EAA or PID to Wallets.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-471-V1-1-1
+    document_name: ETSI TS 119 471 V1.1.1 (2025-05)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119471/01.01.01_60/ts_119471v010101p.pdf
+    paragraph: TS 119 471
+    notes: Policy and security requirements for EAA service providers.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-478-V1-1-1
+    document_name: ETSI TS 119 478 V1.1.1 (2026-01)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119478/01.01.01_60/ts_119478v010101p.pdf
+    paragraph: TS 119 478
+    notes: Authentic-source interface specification relevant to PID/EAA issuance.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 3(2)-(5)
+    notes: PID contains authentication/validation information and is cryptographically bound to the wallet unit.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 4(1)-(3)
+    notes: EAAs comply with supported standards and contain authentication/validation information.
+  - reference_type: eu_legal_act
+    id: EU-2024-2979
+    document_name: Commission Implementing Regulation (EU) 2024/2979 — Wallet integrity and core functionalities
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2979/oj
+    paragraph: Recital 6
+    notes: Wallets securely request, obtain, select, combine, store, delete, share and present PID and EAAs under user control.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-479-1-V1-1-1
+    document_name: ETSI TR 119 479-1 V1.1.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947901/01.01.01_60/tr_11947901v010101p.pdf
+    paragraph: TR 119 479-1
+    notes: Foundational EAA concepts and architectural models.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 3(1)-(5)
+    notes: PID providers issue PID under eID scheme, include validation/authentication information, comply with technical
+      specs, ensure uniqueness and cryptographic binding to wallet unit.
+  - reference_type: eu_legal_act
+    id: EU-2025-1569
+    document_name: Commission Implementing Regulation (EU) 2025/1569 — QEAA and public-sector authentic-source EAAs
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/1569/oj
+    paragraph: Recitals 1-5
+    notes: QEAA and public-sector authentic-source EAAs require interoperable issuance/validation and privacy-preserving revocation
+      management.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-472-1-V1-2-1
+    document_name: ETSI TS 119 472-1 V1.2.1 (2026-02)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11947201/01.02.01_60/ts_11947201v010201p.pdf
+    paragraph: TS 119 472-1
+    notes: General EAA profile requirements.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-479-2-V1-1-1
+    document_name: ETSI TR 119 479-2 V1.1.1 (2025-07)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947902/01.01.01_60/tr_11947902v010101p.pdf
+    paragraph: TR 119 479-2
+    notes: EAA extended validation-services framework and application.
+  - reference_type: openid_profile
+    id: OPENID4VCI
+    document_name: OpenID for Verifiable Credential Issuance
+    url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html
+    paragraph: Credential Offer / Credential Issuer Metadata
+    notes: Protocol source for credential offer and issuer metadata semantics.
+  - &id001
+    reference_type: openid_profile
+    id: OID4VCI-1FINAL
+    document_name: OpenID for Verifiable Credential Issuance 1.0
+    url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#section-
+    paragraph: Conformance-suite section links
+    notes: Core credential issuance protocol.
+  - &id002
+    reference_type: openid_profile
+    id: HAIP
+    document_name: OpenID4VC High Assurance Interoperability Profile 1.0
+    url: https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html#section-
+    paragraph: Conformance-suite section links
+    notes: High-assurance OpenID4VC interoperability profile relevant to EUDI.
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-issuance-persistence-and-presentation-chain
+  title: Issuance plus later presentation/storage chain
+  actor_scope:
+  - wallet
+  - verifier
+  objective: Strengthen storage and internal-processing claims by issuing a credential, restarting/rebooting if desired, and
+    later presenting the same credential to a verifier.
+  recommended_execution:
+    primary_mode: stepci-plus-maestro-plus-verifier
+    credimi_support: supported_native
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: positive-issuance-profile
+    kind: aggregate-ref
+    ref: agg-issuance-positive-profile
+  - step_id: optional-app-restart-or-device-reboot
+    kind: maestro-or-adb
+    purpose: Force state boundary before presentation.
+    outputs:
+    - restart_or_reboot_evidence
+  - step_id: get-presentation-request
+    kind: stepci
+    purpose: Verifier creates presentation request for the issued credential type.
+    outputs:
+    - presentation_request
+    - presentation_metadata
+  - step_id: wallet-present-credential
+    kind: maestro
+    purpose: Wallet presents issued credential.
+    inputs:
+    - presentation_request
+    - conformance_context.presentation_metadata
+    outputs:
+    - maestro_flow_output
+    - screenshots
+    - video
+  - step_id: verifier-inspect-result
+    kind: stepci-or-helper
+    purpose: Verifier confirms the expected credential/claims were presented.
+    outputs:
+    - verifier_result
+    - presented_claims
+  input_requirements:
+    required:
+    - issued_credential_profile
+    - presentation_request
+    - verifier_result
+  emits_flat_tests:
+  - test_no: 16
+    when: presentation succeeds after issuance
+    strength: conditional_to_definitive_observable_storage
+  - test_no: 17
+    when: app restart included and presentation succeeds
+    strength: definitive
+  - test_no: 18
+    when: device reboot included and presentation succeeds
+    strength: definitive
+  - test_no: 19
+    when: presentation succeeds
+    strength: conditional
+  - test_no: 27
+    when: presentation request opened by Wallet
+    strength: definitive
+  - test_no: 28
+    when: OpenID4VP request processed
+    strength: definitive
+  - test_no: 31
+    when: RP identity displayed/asserted
+    strength: definitive
+  - test_no: 32
+    when: requested attributes displayed/asserted
+    strength: definitive
+  - test_no: 34
+    when: approval gating checked
+    strength: definitive
+  - test_no: 36
+    when: full disclosure approved and verifier confirms result
+    strength: definitive
+  - test_no: 39
+    when: verifier inspects SD-JWT disclosures
+    strength: definitive
+  - test_no: 120
+    when: verifier receives callback
+    strength: definitive
+  - test_no: 121
+    when: presented credential is PID
+    strength: definitive
+  - test_no: 122
+    when: presented credential is EAA/QEAA/QEEA
+    strength: definitive
+  - test_no: 123
+    when: credential_format == SD_JWT and verifier inspects disclosures
+    strength: definitive
+  - test_no: 124
+    when: credential_format == MDOC and verifier inspects presentation
+    strength: definitive
+  emits_evidence_claims:
+  - wallet-completes-pid-eaa-issuance
+  - wallet-processes-remote-presentation-request
+  - wallet-displays-rp-identity-and-requested-attributes
+  - wallet-user-approval-before-disclosure
+  - wallet-selective-disclosure
+  - verifier-generates-valid-presentation-request
+  - verifier-validates-credential-signature-status-and-issuer-trust
+  coverage_rules:
+  - rule_id: storage-strengthening
+    if: presentation succeeds after prior issuance
+    then: Upgrade Wallet storage/retrieval evidence from conditional to definitive observable persistence, especially if app
+      restart/reboot was included.
+  - rule_id: verification-strengthening
+    if: verifier inspected credential signature/claims
+    then: Emit definitive verifier-side validation evidence; keep Wallet internal verification evidence conditional unless
+      negative fixture test exists.
+  evidence_artifacts:
+  - presentation_request
+  - presentation_metadata
+  - verifier_callback
+  - presented_claims
+  - maestro_flow_output
+  - screenshots
+  - video
+  notes: []
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 3(2)-(5)
+    notes: PID contains authentication/validation information and is cryptographically bound to the wallet unit.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 4(1)-(3)
+    notes: EAAs comply with supported standards and contain authentication/validation information.
+  - reference_type: eu_legal_act
+    id: EU-2024-2979
+    document_name: Commission Implementing Regulation (EU) 2024/2979 — Wallet integrity and core functionalities
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2979/oj
+    paragraph: Recital 6
+    notes: Wallets securely request, obtain, select, combine, store, delete, share and present PID and EAAs under user control.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-003
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_03
+    paragraph: OIA_03
+    notes: When issuing, presenting, or verifying an attestation, Wallet Units, PID Providers, Attestation Providers, and
+      Relying Parties SHALL only use cryptographic algorithms included in the [ECCG Agreed Cryptographic Mechanisms
+  - reference_type: webuild_working_document
+    id: UC-TE-02
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Wallet Unit Evaluates Credential Issuer
+    notes: ''
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-472-3-V1-1-1
+    document_name: ETSI TS 119 472-3 V1.1.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11947203/01.01.01_60/ts_11947203v010101p.pdf
+    paragraph: TS 119 472-3
+    notes: Profiles for EAA/PID issuance.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-479-1-V1-1-1
+    document_name: ETSI TR 119 479-1 V1.1.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947901/01.01.01_60/tr_11947901v010101p.pdf
+    paragraph: TR 119 479-1
+    notes: Foundational EAA concepts and architectural models.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-471-V1-1-1
+    document_name: ETSI TS 119 471 V1.1.1 (2025-05)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119471/01.01.01_60/ts_119471v010101p.pdf
+    paragraph: TS 119 471
+    notes: Policy/security context for EAA service providers.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 5(1)-(2)
+    notes: Wallet solutions support protocols/interfaces for presentation and respond to authenticated/validated RP requests.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-001
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_01
+    paragraph: OIA_01
+    notes: Wallet Unit supports OpenID4VP for remote presentation flows.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-004
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_03a
+    paragraph: OIA_03a
+    notes: Wallet Solution supports OpenID4VP.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-007
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_04
+    paragraph: OIA_04
+    notes: Wallet Unit verifies and processes OpenID4VP presentation requests.
+  - reference_type: webuild_working_document
+    id: UC-TE-04
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Wallet Unit Evaluates Relying Party
+    notes: task1-use-cases/subtask1-2-trust-registry/wallet-unit-evaluates-relying-party.md
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-472-2-V1-2-1
+    document_name: ETSI TS 119 472-2 V1.2.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11947202/01.02.01_60/ts_11947202v010201p.pdf
+    paragraph: TS 119 472-2
+    notes: Profiles for EAA/PID presentation to Relying Parties.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-475-V1-2-1
+    document_name: ETSI TS 119 475 V1.2.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119475/01.02.01_60/ts_119475v010201p.pdf
+    paragraph: TS 119 475
+    notes: Relying-party attributes supporting Wallet user authorization decisions.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 3(5)-(7)
+    notes: Wallet units display to users information from RP access certificates / registration certificates and requested
+      attributes.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Recital 9
+    notes: Wallet users should be able to verify registration data of wallet-relying parties.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-008
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_05
+    paragraph: OIA_05
+    notes: Wallet displays requesting RP identity and requested attributes.
+  - reference_type: arf_requirement
+    id: EW-DM-44-014
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_16
+    paragraph: RPRC_16
+    notes: Wallet offers user possibility to verify registered RP information.
+  - reference_type: arf_requirement
+    id: EW-DM-44-021
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_21
+    paragraph: RPRC_21
+    notes: Wallet shows result of RP registration verification to user.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 3(9)
+    notes: Wallet units do not present requested attributes until user authentication, disclosure policy processing, and partial/full
+      user approval are met.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 5(2)
+    notes: Wallet units respond to successfully authenticated and validated RP requests at users' request.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-009
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_06
+    paragraph: OIA_06
+    notes: Wallet presents requested attributes only after user approval.
+  - reference_type: arf_requirement
+    id: AS-WP-06-009
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPA_07
+    paragraph: RPA_07
+    notes: Wallet ensures user approval before presenting attributes.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 5(4)
+    notes: Wallet solutions support selective disclosure of PID and EAA attributes.
+  - reference_type: eu_legal_act
+    id: EU-2024-2979
+    document_name: Commission Implementing Regulation (EU) 2024/2979 — Wallet integrity and core functionalities
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2979/oj
+    paragraph: Recital 10
+    notes: Wallets should support data formats and selective disclosure for cross-border interoperability.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-010
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_07
+    paragraph: OIA_07
+    notes: Wallet supports selective disclosure of PID and attestation attributes.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-476-V1-2-1
+    document_name: ETSI TR 119 476 V1.2.1 (2024-07)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/119476/01.02.01_60/tr_119476v010201p.pdf
+    paragraph: TR 119 476
+    notes: Analysis of selective disclosure and zero-knowledge proofs applied to EAA.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-476-1-V1-3-1
+    document_name: ETSI TR 119 476-1 V1.3.1 (2025-08)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947601/01.03.01_60/tr_11947601v010301p.pdf
+    paragraph: TR 119 476-1
+    notes: Feasibility study for selective disclosure and zero-knowledge proofs applied to EAA.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 5
+    notes: Wallet solutions support protocols/interfaces for presentation and respond to authenticated/validated RP requests.
+  - reference_type: webuild_working_document
+    id: UC-TE-05
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Relying Party Evaluates Presented Credentials
+    notes: task1-use-cases/subtask1-2-trust-registry/relying-party-evaluates-credentials.md
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 5
+    notes: PID validity status must be publicly available in privacy-preserving manner.
+  - reference_type: eu_legal_act
+    id: EU-2025-1569
+    document_name: Commission Implementing Regulation (EU) 2025/1569 — QEAA and public-sector authentic-source EAAs
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/1569/oj
+    paragraph: Recital 5
+    notes: QEAAs/public-sector EAAs must be revocable or have compensating measures for non-revocability.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-020
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_12
+    paragraph: OIA_12
+    notes: RP validates PID signature using PID Provider LoTE trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-021
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_13
+    paragraph: OIA_13
+    notes: RP validates QEAA qualified signature using appropriate trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-022
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_14
+    paragraph: OIA_14
+    notes: RP validates PuB-EAA qualified signature using appropriate trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-023
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_15
+    paragraph: OIA_15
+    notes: RP validates non-qualified EAA signature using rulebook trust anchor.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-441-V1-3-1
+    document_name: ETSI TS 119 441 V1.3.1 (2025-10)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119441/01.03.01_60/ts_119441v010301p.pdf
+    paragraph: TS 119 441
+    notes: Policy requirements for validation services.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-442-V1-1-1
+    document_name: ETSI TS 119 442 V1.1.1 (2019-02)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119442/01.01.01_60/ts_119442v010101p.pdf
+    paragraph: TS 119 442
+    notes: Protocol profiles for validation services.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-2-V2-6-1
+    document_name: ETSI EN 319 411-2 V2.6.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941102/02.06.01_60/en_31941102v020601p.pdf
+    paragraph: EN 319 411-2
+    notes: Qualified certificate issuance requirements.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-5-V2-6-1
+    document_name: ETSI EN 319 412-5 V2.6.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941205/02.06.01_60/en_31941205v020601p.pdf
+    paragraph: EN 319 412-5
+    notes: Qualified certificate statements.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-479-2-V1-1-1
+    document_name: ETSI TR 119 479-2 V1.1.1 (2025-07)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947902/01.01.01_60/tr_11947902v010101p.pdf
+    paragraph: TR 119 479-2
+    notes: EAA extended validation-service framework.
+  - reference_type: openid_profile
+    id: OPENID4VP
+    document_name: OpenID for Verifiable Presentations
+    url: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html
+    paragraph: Presentation request / response
+    notes: Protocol source for remote presentation flows.
+  - *id001
+  - *id002
+  - &id003
+    reference_type: openid_profile
+    id: OID4VP-1FINAL
+    document_name: OpenID for Verifiable Presentations 1.0
+    url: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#section-
+    paragraph: Conformance-suite section links
+    notes: Core presentation protocol.
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-wallet-issuer-negative-crypto-trust-suite
+  title: Wallet issuance negative crypto/trust suite
+  actor_scope:
+  - wallet
+  - issuer
+  objective: Use controlled bad issuers/offers to prove Wallet rejection/warning behaviour for invalid signatures, expired/revoked
+    certificates and untrusted issuers.
+  recommended_execution:
+    primary_mode: negative-fixture-plus-maestro
+    credimi_support: credimi_upcoming
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: select-negative-issuer-fixture
+    kind: fixture-selector
+    outputs:
+    - fixture_metadata
+  - step_id: get-negative-offer
+    kind: stepci
+    outputs:
+    - credential_offer
+    - credential_metadata
+  - step_id: wallet-attempt-issuance
+    kind: maestro
+    outputs:
+    - maestro_flow_output
+    - warning_or_failure_screenshot
+  - step_id: assert-expected-failure
+    kind: helper
+    outputs:
+    - negative_test_result
+  input_requirements:
+    required:
+    - negative_fixture_type
+    - credential_metadata
+    - expected_wallet_failure_or_warning
+  emits_flat_tests:
+  - test_no: 20
+    when: fixture_type == invalid_issuer_signature
+    strength: definitive
+  - test_no: 21
+    when: fixture_type == expired_issuer_certificate
+    strength: definitive
+  - test_no: 22
+    when: fixture_type == revoked_issuer_certificate
+    strength: definitive
+  - test_no: 23
+    when: fixture_type == untrusted_issuer
+    strength: definitive
+  - test_no: 24
+    when: positive trusted issuer control also run
+    strength: definitive
+  - test_no: 125
+    when: verifier negative invalid-signature fixture also run
+    strength: definitive
+  - test_no: 129
+    when: untrusted issuer verifier fixture also run
+    strength: definitive
+  emits_evidence_claims:
+  - wallet-receives-pid-eaa-issuance-request
+  - issuer-validity-status-and-revocation
+  - verifier-validates-credential-signature-status-and-issuer-trust
+  coverage_rules:
+  - rule_id: negative-fixture-proves-rejection
+    if: wallet warning/failure matches expected negative fixture
+    then: Emit definitive rejection evidence for the tested negative condition.
+  evidence_artifacts:
+  - negative_fixture_metadata
+  - credential_offer
+  - credential_metadata
+  - warning_or_failure_screenshot
+  - negative_test_result
+  notes: []
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 4
+    notes: Issuance of PID and EAAs to wallet units.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 3
+    notes: Issuance of person identification data to wallet units.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 4
+    notes: Issuance of electronic attestations of attributes to wallet units.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-003
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_03
+    paragraph: OIA_03
+    notes: Required protocol standards for issuing, presenting, verifying attestations.
+  - reference_type: arf_requirement
+    id: AS-AP-10-029
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=ISSU_22
+    paragraph: ISSU_22
+    notes: Credential Issuer metadata signing / issuer metadata evidence.
+  - reference_type: arf_requirement
+    id: AS-AP-10-048
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=ISSU_32
+    paragraph: ISSU_32
+    notes: Attestation Provider metadata signing / issuer metadata evidence.
+  - reference_type: webuild_working_document
+    id: UC-TE-02
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Wallet Unit Evaluates Credential Issuer
+    notes: task1-use-cases/subtask1-2-trust-registry/wallet-unit-evaluates-credential-issuer.md
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-472-3-V1-1-1
+    document_name: ETSI TS 119 472-3 V1.1.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11947203/01.01.01_60/ts_11947203v010101p.pdf
+    paragraph: TS 119 472-3
+    notes: Profiles for issuing EAA or PID to Wallets.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-471-V1-1-1
+    document_name: ETSI TS 119 471 V1.1.1 (2025-05)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119471/01.01.01_60/ts_119471v010101p.pdf
+    paragraph: TS 119 471
+    notes: Policy and security requirements for EAA service providers.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-478-V1-1-1
+    document_name: ETSI TS 119 478 V1.1.1 (2026-01)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119478/01.01.01_60/ts_119478v010101p.pdf
+    paragraph: TS 119 478
+    notes: Authentic-source interface specification relevant to PID/EAA issuance.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 5
+    notes: PID providers maintain public validity-status policies, revoke under defined circumstances, notify users, and make
+      validity status publicly available in a privacy-preserving manner.
+  - reference_type: eu_legal_act
+    id: EU-2025-1569
+    document_name: Commission Implementing Regulation (EU) 2025/1569 — QEAA and public-sector authentic-source EAAs
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/1569/oj
+    paragraph: Recital 5
+    notes: QEAA / public-sector EAA providers should support revocation or compensating measures and privacy-preserving revocation
+      management.
+  - reference_type: arf_requirement
+    id: AS-MS-27-017
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=Reg_14
+    paragraph: Reg_14
+    notes: Registration/revocation-related ARF anchor; text in uploaded HLR may be incomplete.
+  - reference_type: arf_requirement
+    id: EW-DM-44-002
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_02
+    paragraph: RPRC_02
+    notes: Registration/revocation-related ARF anchor; text in uploaded HLR may be incomplete.
+  - reference_type: webuild_working_document
+    id: UC-TE-05
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Relying Party Evaluates Presented Credentials
+    notes: ''
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-479-2-V1-1-1
+    document_name: ETSI TR 119 479-2 V1.1.1 (2025-07)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947902/01.01.01_60/tr_11947902v010101p.pdf
+    paragraph: TR 119 479-2
+    notes: EAA extended validation-services framework.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-441-V1-3-1
+    document_name: ETSI TS 119 441 V1.3.1 (2025-10)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119441/01.03.01_60/ts_119441v010301p.pdf
+    paragraph: TS 119 441
+    notes: Policy requirements for validation services.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-442-V1-1-1
+    document_name: ETSI TS 119 442 V1.1.1 (2019-02)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119442/01.01.01_60/ts_119442v010101p.pdf
+    paragraph: TS 119 442
+    notes: Protocol profiles for validation services.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-020
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_12
+    paragraph: OIA_12
+    notes: RP validates PID signature using PID Provider LoTE trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-021
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_13
+    paragraph: OIA_13
+    notes: RP validates QEAA qualified signature using appropriate trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-022
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_14
+    paragraph: OIA_14
+    notes: RP validates PuB-EAA qualified signature using appropriate trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-023
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_15
+    paragraph: OIA_15
+    notes: RP validates non-qualified EAA signature using rulebook trust anchor.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-2-V2-6-1
+    document_name: ETSI EN 319 411-2 V2.6.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941102/02.06.01_60/en_31941102v020601p.pdf
+    paragraph: EN 319 411-2
+    notes: Qualified certificate issuance requirements.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-5-V2-6-1
+    document_name: ETSI EN 319 412-5 V2.6.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941205/02.06.01_60/en_31941205v020601p.pdf
+    paragraph: EN 319 412-5
+    notes: Qualified certificate statements.
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-presentation-rp-entitlement-suite
+  title: Presentation plus RP registration/entitlement suite
+  actor_scope:
+  - wallet
+  - relying_party
+  - verifier
+  objective: Generate a presentation request, resolve RP registration/certificates/entitlements, drive Wallet display/approval,
+    and validate request-vs-entitlement behaviour.
+  recommended_execution:
+    primary_mode: stepci-plus-trust-helper-plus-maestro
+    credimi_support: credimi_upcoming
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: get-presentation-request
+    kind: stepci
+    outputs:
+    - presentation_request
+  - step_id: resolve-rp-metadata
+    kind: trust-helper
+    outputs:
+    - rp_register_entry
+    - rp_access_certificate
+    - rp_registration_certificate
+    - rp_entitlements
+    - presentation_metadata
+  - step_id: compare-request-to-entitlement
+    kind: trust-helper
+    outputs:
+    - entitlement_result
+  - step_id: wallet-open-and-display-request
+    kind: maestro
+    outputs:
+    - rp_display_screenshot
+    - maestro_flow_output
+  - step_id: approval-or-rejection
+    kind: maestro
+    outputs:
+    - verifier_callback_or_expected_failure
+  input_requirements:
+    required:
+    - presentation_request
+    - rp_identifier
+    - requested_attributes
+  emits_flat_tests:
+  - test_no: 31
+    when: Wallet displays RP identity
+    strength: definitive
+  - test_no: 32
+    when: Wallet displays requested attributes
+    strength: definitive
+  - test_no: 33
+    when: Wallet displays RP cert/register info
+    strength: definitive
+  - test_no: 40
+    when: negative unauthorized-attribute request is rejected/warned
+    strength: definitive
+  - test_no: 41
+    when: RP authentication failure fixture is warned/rejected
+    strength: definitive
+  - test_no: 42
+    when: valid RP cert accepted
+    strength: definitive
+  - test_no: 43
+    when: expired RP cert fixture rejected
+    strength: definitive
+  - test_no: 44
+    when: revoked RP cert fixture rejected
+    strength: definitive
+  - test_no: 45
+    when: mismatched registration cert fixture rejected
+    strength: definitive
+  - test_no: 46
+    when: Wallet displays registration verification result
+    strength: definitive
+  - test_no: 108
+    when: requested attributes parsed
+    strength: definitive
+  - test_no: 109
+    when: RP identifier parsed
+    strength: definitive
+  - test_no: 110
+    when: RP access certificate present
+    strength: definitive
+  - test_no: 111
+    when: RP registration certificate present
+    strength: definitive
+  - test_no: 112
+    when: RP register entry resolved
+    strength: definitive
+  - test_no: 113
+    when: RP cert chains to trust anchor
+    strength: definitive
+  - test_no: 114
+    when: RP cert validity checked
+    strength: definitive
+  - test_no: 115
+    when: RP cert revocation checked
+    strength: definitive
+  - test_no: 116
+    when: RP cert matches register identity
+    strength: definitive
+  - test_no: 117
+    when: registration cert lists attributes
+    strength: definitive
+  - test_no: 118
+    when: requested attributes within entitlement
+    strength: definitive
+  - test_no: 119
+    when: negative over-request fixture fails
+    strength: definitive
+  - test_no: 135
+    when: ETSI TS 119 475 helper enabled
+    strength: conditional
+  emits_evidence_claims:
+  - wallet-displays-rp-identity-and-requested-attributes
+  - wallet-user-approval-before-disclosure
+  - rp-registration-information-available
+  - rp-access-certificate-validation
+  - rp-registration-certificate-entitlement-match
+  - rp-requested-attributes-match-entitlements
+  - relying-party-attributes-standards-validation
+  coverage_rules: []
+  evidence_artifacts:
+  - presentation_request
+  - presentation_metadata
+  - rp_register_entry
+  - rp_access_certificate
+  - rp_registration_certificate
+  - entitlement_result
+  - rp_display_screenshot
+  - maestro_flow_output
+  notes: []
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 3(5)-(7)
+    notes: Wallet units display to users information from RP access certificates / registration certificates and requested
+      attributes.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Recital 9
+    notes: Wallet users should be able to verify registration data of wallet-relying parties.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-008
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_05
+    paragraph: OIA_05
+    notes: Wallet displays requesting RP identity and requested attributes.
+  - reference_type: arf_requirement
+    id: EW-DM-44-014
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_16
+    paragraph: RPRC_16
+    notes: Wallet offers user possibility to verify registered RP information.
+  - reference_type: arf_requirement
+    id: EW-DM-44-021
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_21
+    paragraph: RPRC_21
+    notes: Wallet shows result of RP registration verification to user.
+  - reference_type: webuild_working_document
+    id: UC-TE-04
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Wallet Unit Evaluates Relying Party
+    notes: ''
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-475-V1-2-1
+    document_name: ETSI TS 119 475 V1.2.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119475/01.02.01_60/ts_119475v010201p.pdf
+    paragraph: TS 119 475
+    notes: Relying-party attributes that support Wallet user authorization decisions.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-472-2-V1-2-1
+    document_name: ETSI TS 119 472-2 V1.2.1 (2026-03)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11947202/01.02.01_60/ts_11947202v010201p.pdf
+    paragraph: TS 119 472-2
+    notes: Presentation profile context for requested attributes.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 3(9)
+    notes: Wallet units do not present requested attributes until user authentication, disclosure policy processing, and partial/full
+      user approval are met.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 5(2)
+    notes: Wallet units respond to successfully authenticated and validated RP requests at users' request.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-009
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_06
+    paragraph: OIA_06
+    notes: Wallet presents requested attributes only after user approval.
+  - reference_type: arf_requirement
+    id: AS-WP-06-009
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPA_07
+    paragraph: RPA_07
+    notes: Wallet ensures user approval before presenting attributes.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Recitals 3-5
+    notes: Member States set up human- and machine-readable interfaces; RP information including entitlements is public for
+      trust/transparency.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Article 4
+    notes: National registration policies include identification, supporting documentation, entitlements, authentic sources,
+      automated registration, redress and verification rules.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Article 5
+    notes: RPs provide required Annex I information and keep it accurate.
+  - reference_type: arf_requirement
+    id: EW-DM-44-016
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_18
+    paragraph: RPRC_18
+    notes: If the User indicated that they want to verify the information registered about the Relying Party, but the Relying
+      Party did not send a registration certificate to the Wallet Unit, the Wallet Unit SHALL connect to the UR
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Recital 8
+    notes: Wallet-relying parties should use access certificates to identify themselves to wallet units.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Annex IV
+    notes: Access certificate policies include revocation procedures, monitoring register changes, validation mechanisms,
+      revocation status publication and machine-processable policy references.
+  - reference_type: arf_requirement
+    id: AS-WP-06-005
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPA_04
+    paragraph: RPA_04
+    notes: Wallet accepts trust anchors for Access Certificate Authorities.
+  - reference_type: arf_requirement
+    id: AS-WP-06-006
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPA_05
+    paragraph: RPA_05
+    notes: Wallet informs user when RP authentication fails.
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Relying Party Access Certificate Example
+    notes: task5-participants-certificates-policies/relying_party_access_certificate.md
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-1-V1-5-1
+    document_name: ETSI EN 319 411-1 V1.5.1 (2025-04)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941101/01.05.01_60/en_31941101v010501p.pdf
+    paragraph: EN 319 411-1
+    notes: Policy/security requirements for certificate-issuing TSPs.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-2-V2-6-1
+    document_name: ETSI EN 319 411-2 V2.6.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941102/02.06.01_60/en_31941102v020601p.pdf
+    paragraph: EN 319 411-2
+    notes: Requirements for TSPs issuing EU qualified certificates.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-1-V1-7-1
+    document_name: ETSI EN 319 412-1 V1.7.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941201/01.07.01_60/en_31941201v010701p.pdf
+    paragraph: EN 319 412-1
+    notes: Certificate profile overview and common data structures.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-2-V2-5-0
+    document_name: ETSI EN 319 412-2 V2.5.0 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941202/02.05.00_20/en_31941202v020500a.pdf
+    paragraph: EN 319 412-2
+    notes: Certificate profile for natural persons.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-3-V1-4-0
+    document_name: ETSI EN 319 412-3 V1.4.0 (2026-04)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941203/01.04.00_20/en_31941203v010400a.pdf
+    paragraph: EN 319 412-3
+    notes: Certificate profile for legal persons.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-4-V1-4-1
+    document_name: ETSI EN 319 412-4 V1.4.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941204/01.04.01_60/en_31941204v010401p.pdf
+    paragraph: EN 319 412-4
+    notes: Certificate profile for web site certificates.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-5-V2-6-1
+    document_name: ETSI EN 319 412-5 V2.6.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941205/02.06.01_60/en_31941205v020601p.pdf
+    paragraph: EN 319 412-5
+    notes: Qualified certificate statements.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-495-V1-8-1
+    document_name: ETSI TS 119 495 V1.8.1 (2026-04)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119495/01.08.01_60/ts_119495v010801p.pdf
+    paragraph: TS 119 495
+    notes: Sector-specific certificate/TSP requirements for open banking.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 2(14)
+    notes: RP registration certificate indicates attributes the RP has registered to request from users.
+  - reference_type: eu_legal_act
+    id: EU-2024-2982
+    document_name: Commission Implementing Regulation (EU) 2024/2982 — Protocols and interfaces
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2982/oj
+    paragraph: Article 3(4), 3(7)
+    notes: Wallet units authenticate/validate RP registration certificate where applicable and display its information to
+      users.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Annex V
+    notes: Registration certificate policies include PKI hierarchy, issuance procedures, register consistency, access certificate
+      validity, revocation and validation mechanisms.
+  - reference_type: arf_requirement
+    id: EW-DM-44-017
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_19
+    paragraph: RPRC_19
+    notes: RP includes applicable registration certificate in presentation request.
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Relying Party Registration Certificate Example
+    notes: task5-participants-certificates-policies/relying_party_registration_certificate.md
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Article 4(4)
+    notes: Registration procedures enable RPs to indicate specific entitlement(s) under which they act.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Article 6(3)-(5)
+    notes: Registrars verify entitlements and information against supporting documentation/authentic sources.
+  - reference_type: openid_profile
+    id: OPENID4VP
+    document_name: OpenID for Verifiable Presentations
+    url: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html
+    paragraph: Presentation request / response
+    notes: Protocol source for remote presentation flows.
+  - *id003
+  - *id002
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-verifier-negative-credential-validation-suite
+  title: Verifier credential validation negative suite
+  actor_scope:
+  - verifier
+  - issuer
+  - trust_infrastructure
+  objective: Use positive and negative credential fixtures to prove verifier acceptance/rejection for signatures, validity,
+    revocation and trust anchors.
+  recommended_execution:
+    primary_mode: stepci-plus-fixtures-plus-trust-helper
+    credimi_support: credimi_upcoming
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: select-credential-fixture
+    kind: fixture-selector
+    outputs:
+    - credential_fixture_metadata
+  - step_id: send-presentation-or-validation-material
+    kind: stepci
+    outputs:
+    - verifier_result
+  - step_id: trust-resolution
+    kind: trust-helper
+    outputs:
+    - issuer_trust_result
+    - revocation_result
+    - certificate_validation_result
+  - step_id: normalize-result
+    kind: result-aggregator
+    outputs:
+    - evidence_claim_results
+  input_requirements:
+    required:
+    - credential_fixture
+    - expected_verifier_result
+  emits_flat_tests:
+  - test_no: 121
+    when: valid PID presentation accepted
+    strength: definitive
+  - test_no: 122
+    when: valid EAA presentation accepted
+    strength: definitive
+  - test_no: 123
+    when: SD-JWT disclosures inspected
+    strength: definitive
+  - test_no: 124
+    when: mdoc presentation inspected
+    strength: definitive
+  - test_no: 125
+    when: invalid signature fixture rejected
+    strength: definitive
+  - test_no: 126
+    when: expired credential fixture rejected
+    strength: definitive
+  - test_no: 127
+    when: not-yet-valid credential fixture rejected
+    strength: definitive
+  - test_no: 128
+    when: revoked credential fixture rejected
+    strength: definitive
+  - test_no: 129
+    when: untrusted issuer fixture rejected
+    strength: definitive
+  - test_no: 130
+    when: trust anchor resolution included
+    strength: definitive
+  - test_no: 132
+    when: qualified validation service involved
+    strength: requires_external
+  - test_no: 137
+    when: ETSI TS 119 441/442 validation included
+    strength: requires_external_or_credimi_upcoming
+  emits_evidence_claims:
+  - verifier-validates-credential-signature-status-and-issuer-trust
+  - issuer-validity-status-and-revocation
+  - qualified-validation-service-standards-validation
+  - electronic-signature-seal-validation-process
+  coverage_rules: []
+  evidence_artifacts:
+  - credential_fixture_metadata
+  - verifier_result
+  - issuer_trust_result
+  - revocation_result
+  - certificate_validation_result
+  - signature_validation_result
+  notes: []
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 5
+    notes: PID validity status must be publicly available in privacy-preserving manner.
+  - reference_type: eu_legal_act
+    id: EU-2025-1569
+    document_name: Commission Implementing Regulation (EU) 2025/1569 — QEAA and public-sector authentic-source EAAs
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/1569/oj
+    paragraph: Recital 5
+    notes: QEAAs/public-sector EAAs must be revocable or have compensating measures for non-revocability.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-020
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_12
+    paragraph: OIA_12
+    notes: RP validates PID signature using PID Provider LoTE trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-021
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_13
+    paragraph: OIA_13
+    notes: RP validates QEAA qualified signature using appropriate trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-022
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_14
+    paragraph: OIA_14
+    notes: RP validates PuB-EAA qualified signature using appropriate trust anchor.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-023
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_15
+    paragraph: OIA_15
+    notes: RP validates non-qualified EAA signature using rulebook trust anchor.
+  - reference_type: webuild_working_document
+    id: UC-TE-05
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Relying Party Evaluates Presented Credentials
+    notes: ''
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-441-V1-3-1
+    document_name: ETSI TS 119 441 V1.3.1 (2025-10)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119441/01.03.01_60/ts_119441v010301p.pdf
+    paragraph: TS 119 441
+    notes: Policy requirements for validation services.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-442-V1-1-1
+    document_name: ETSI TS 119 442 V1.1.1 (2019-02)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119442/01.01.01_60/ts_119442v010101p.pdf
+    paragraph: TS 119 442
+    notes: Protocol profiles for validation services.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-2-V2-6-1
+    document_name: ETSI EN 319 411-2 V2.6.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941102/02.06.01_60/en_31941102v020601p.pdf
+    paragraph: EN 319 411-2
+    notes: Qualified certificate issuance requirements.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-5-V2-6-1
+    document_name: ETSI EN 319 412-5 V2.6.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941205/02.06.01_60/en_31941205v020601p.pdf
+    paragraph: EN 319 412-5
+    notes: Qualified certificate statements.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-479-2-V1-1-1
+    document_name: ETSI TR 119 479-2 V1.1.1 (2025-07)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/11947902/01.01.01_60/tr_11947902v010101p.pdf
+    paragraph: TR 119 479-2
+    notes: EAA extended validation-service framework.
+  - reference_type: arf_requirement
+    id: AS-MS-27-017
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=Reg_14
+    paragraph: Reg_14
+    notes: Registration/revocation-related ARF anchor; text in uploaded HLR may be incomplete.
+  - reference_type: arf_requirement
+    id: EW-DM-44-002
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPRC_02
+    paragraph: RPRC_02
+    notes: Registration/revocation-related ARF anchor; text in uploaded HLR may be incomplete.
+  - reference_type: eu_legal_act
+    id: EU-2025-1945
+    document_name: Commission Implementing Regulation (EU) 2025/1945 — Validation of electronic signatures and seals
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/1945/oj
+    paragraph: Article 1 and Annexes I-II
+    notes: Reference standards and specifications for validating qualified electronic signatures/seals and advanced signatures/seals
+      based on qualified certificates.
+  - &id004
+    reference_type: ietf_draft
+    id: OAUTH-STATUS-LIST
+    document_name: OAuth Status List
+    url: https://datatracker.ietf.org/doc/html/draft-ietf-oauth-status-list-15#section-
+    paragraph: Conformance-suite section links
+    notes: Status list / revocation source.
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-trust-infrastructure-resolution-suite
+  title: Trust infrastructure resolution suite
+  actor_scope:
+  - trust_infrastructure
+  objective: Fetch and validate LoTL/Trusted Lists, resolve actors, validate certificates, status and trust mode.
+  recommended_execution:
+    primary_mode: trust-helper
+    credimi_support: credimi_upcoming
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: fetch-lotl
+    kind: trust-helper
+    outputs:
+    - lotl_snapshot
+  - step_id: discover-trusted-lists
+    kind: trust-helper
+    outputs:
+    - trusted_list_urls
+  - step_id: validate-list-schema-signature-freshness
+    kind: trust-helper
+    outputs:
+    - list_validation_result
+  - step_id: resolve-actor
+    kind: trust-helper
+    outputs:
+    - actor_status_result
+  - step_id: validate-cert-status
+    kind: trust-helper
+    outputs:
+    - certificate_validation_result
+    - revocation_result
+  - step_id: hash-artifacts
+    kind: evidence-bundler
+    outputs:
+    - hash_manifest
+  input_requirements:
+    required:
+    - lotl_url_or_registry_config
+    - actor_identifier
+  emits_flat_tests:
+  - test_no: 138
+    when: LoTL fetched
+    strength: definitive
+  - test_no: 139
+    when: Trusted Lists discovered
+    strength: definitive
+  - test_no: 140
+    when: schema validation run
+    strength: definitive
+  - test_no: 141
+    when: signature/seal validation run
+    strength: definitive
+  - test_no: 142
+    when: freshness policy checked
+    strength: definitive
+  - test_no: 143
+    when: actor resolved
+    strength: definitive
+  - test_no: 144
+    when: actor status normalized
+    strength: definitive
+  - test_no: 145
+    when: trust anchor resolved
+    strength: definitive
+  - test_no: 146
+    when: certificate chain validated
+    strength: definitive
+  - test_no: 147
+    when: CRL checked
+    strength: definitive
+  - test_no: 148
+    when: OCSP checked
+    strength: definitive
+  - test_no: 149
+    when: credential status checked
+    strength: definitive
+  - test_no: 150
+    when: trust mode labelled
+    strength: definitive
+  - test_no: 151
+    when: snapshots hashed
+    strength: definitive
+  - test_no: 136
+    when: ETSI certificate profile validation enabled
+    strength: definitive
+  emits_evidence_claims:
+  - trusted-list-discovery
+  - trusted-list-schema-signature-and-freshness-validation
+  - trusted-actor-status-resolution
+  - certificate-profile-standards-validation
+  - rp-access-certificate-validation
+  coverage_rules: []
+  evidence_artifacts:
+  - lotl_snapshot
+  - trusted_list_snapshots
+  - list_validation_result
+  - actor_status_result
+  - certificate_validation_result
+  - revocation_result
+  - hash_manifest
+  notes: []
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2980
+    document_name: Commission Implementing Regulation (EU) 2024/2980 — Notifications to the Commission
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2980/oj
+    paragraph: Recital 6
+    notes: Ecosystem trust information should be made available for automated processing.
+  - reference_type: arf_requirement
+    id: EW-DM-31-003
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=TLPub_04
+    paragraph: TLPub_04
+    notes: Published information does not require authentication or prior registration.
+  - reference_type: webuild_working_document
+    id: UC-TE-06
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Trusted List Discovery and Consumption
+    notes: task1-use-cases/subtask1-2-trust-registry/trusted-list-discovery-consumption.md
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: LoTL Publication and Trusted Lists Integration
+    notes: task4-trust-infrastructure-api/lotl-automation-and-tl-integration.md
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-401-V3-2-1
+    document_name: ETSI EN 319 401 V3.2.1 (2026-01)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/319401/03.02.01_60/en_319401v030201p.pdf
+    paragraph: EN 319 401
+    notes: General TSP policy context for trust infrastructure.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-403-1-V2-3-1
+    document_name: ETSI EN 319 403-1 V2.3.1 (2020-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31940301/02.03.01_60/en_31940301v020301p.pdf
+    paragraph: EN 319 403-1
+    notes: Conformity assessment context for trust infrastructure.
+  - reference_type: arf_requirement
+    id: EW-DM-31-002
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=TLPub_03
+    paragraph: TLPub_03
+    notes: Publication over secure channel protecting authenticity and integrity.
+  - reference_type: arf_requirement
+    id: EW-DM-31-004
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=TLPub_05
+    paragraph: TLPub_05
+    notes: Published information is signed/sealed, automated-processable, human-readable and authenticated.
+  - reference_type: arf_requirement
+    id: AS-MS-31-020
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=TLPub_07
+    paragraph: TLPub_07
+    notes: Commission publishes trust anchors for verifying signatures/seals.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-1-V1-5-1
+    document_name: ETSI EN 319 411-1 V1.5.1 (2025-04)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941101/01.05.01_60/en_31941101v010501p.pdf
+    paragraph: EN 319 411-1
+    notes: Certificate-issuing TSP requirements.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-411-2-V2-6-1
+    document_name: ETSI EN 319 411-2 V2.6.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941102/02.06.01_60/en_31941102v020601p.pdf
+    paragraph: EN 319 411-2
+    notes: Qualified certificate-issuing TSP requirements.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Article 6
+    notes: Registrars verify RP information and entitlements against supporting documentation/authentic sources; registration
+      can be modified/suspended/cancelled.
+  - reference_type: eu_legal_act
+    id: EU-2024-2977
+    document_name: Commission Implementing Regulation (EU) 2024/2977 — PID and electronic attestations of attributes
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2977/oj
+    paragraph: Article 5
+    notes: PID/EAA validity status and revocation are made available in privacy-preserving manner.
+  - reference_type: arf_requirement
+    id: AS-MS-31-005
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=GenNot_05
+    paragraph: GenNot_05
+    notes: SOPs for suspension or cancellation of providers and related actors.
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Trusted Lists, Participant Registration, and Trust Evaluation Matrix
+    notes: task2-trust-framework/trusted-list-registration-trust-evaluation-matrix.md
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-1-V1-7-1
+    document_name: ETSI EN 319 412-1 V1.7.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941201/01.07.01_60/en_31941201v010701p.pdf
+    paragraph: EN 319 412-1
+    notes: Certificate profile overview and common structures.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-2-V2-5-0
+    document_name: ETSI EN 319 412-2 V2.5.0 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941202/02.05.00_20/en_31941202v020500a.pdf
+    paragraph: EN 319 412-2
+    notes: Certificate profile for natural persons.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-3-V1-4-0
+    document_name: ETSI EN 319 412-3 V1.4.0 (2026-04)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941203/01.04.00_20/en_31941203v010400a.pdf
+    paragraph: EN 319 412-3
+    notes: Certificate profile for legal persons.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-4-V1-4-1
+    document_name: ETSI EN 319 412-4 V1.4.1 (2025-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941204/01.04.01_60/en_31941204v010401p.pdf
+    paragraph: EN 319 412-4
+    notes: Certificate profile for web site certificates.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-412-5-V2-6-1
+    document_name: ETSI EN 319 412-5 V2.6.1 (2026-05)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31941205/02.06.01_60/en_31941205v020601p.pdf
+    paragraph: EN 319 412-5
+    notes: Qualified certificate statements.
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-412-6-V1-2-1
+    document_name: ETSI TS 119 412-6 V1.2.1 (2026-04)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/11941206/01.02.01_60/ts_11941206v010201p.pdf
+    paragraph: TS 119 412-6
+    notes: Certificate profiles for distributed ledger identifiers.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Recital 8
+    notes: Wallet-relying parties should use access certificates to identify themselves to wallet units.
+  - reference_type: eu_legal_act
+    id: EU-2025-848
+    document_name: Commission Implementing Regulation (EU) 2025/848 — Registration of Wallet-relying parties
+    url: https://eur-lex.europa.eu/eli/reg_impl/2025/848/oj
+    paragraph: Annex IV
+    notes: Access certificate policies include revocation procedures, monitoring register changes, validation mechanisms,
+      revocation status publication and machine-processable policy references.
+  - reference_type: arf_requirement
+    id: AS-WP-06-005
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPA_04
+    paragraph: RPA_04
+    notes: Wallet accepts trust anchors for Access Certificate Authorities.
+  - reference_type: arf_requirement
+    id: AS-WP-06-006
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=RPA_05
+    paragraph: RPA_05
+    notes: Wallet informs user when RP authentication fails.
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Relying Party Access Certificate Example
+    notes: task5-participants-certificates-policies/relying_party_access_certificate.md
+  - reference_type: etsi_standard
+    id: ETSI-TS-119-495-V1-8-1
+    document_name: ETSI TS 119 495 V1.8.1 (2026-04)
+    url: https://www.etsi.org/deliver/etsi_ts/119400_119499/119495/01.08.01_60/ts_119495v010801p.pdf
+    paragraph: TS 119 495
+    notes: Sector-specific certificate/TSP requirements for open banking.
+  - *id004
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-evidence-bundle-generation
+  title: Evidence bundle generation
+  actor_scope:
+  - credimi_platform
+  objective: Produce the machine-readable conformance result and evidence bundle from all executed steps.
+  recommended_execution:
+    primary_mode: result-aggregator
+    credimi_support: supported_native
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: collect-temporal-history
+    kind: result-aggregator
+    outputs:
+    - temporal_input_output
+  - step_id: collect-step-artifacts
+    kind: result-aggregator
+    outputs:
+    - step_inputs_outputs
+    - screenshots
+    - videos
+  - step_id: hash-artifacts
+    kind: result-aggregator
+    outputs:
+    - hash_manifest
+  - step_id: emit-conformance-result
+    kind: result-aggregator
+    outputs:
+    - conformance_result_json
+  - step_id: optional-pdf-report
+    kind: report-renderer
+    outputs:
+    - pdf_report
+  input_requirements:
+    required:
+    - workflow_id
+    - workflow_run_id
+    - executed_steps
+    - step_outputs
+  emits_flat_tests:
+  - test_no: 152
+    when: Temporal input/output exported
+    strength: definitive
+  - test_no: 153
+    when: step input/output exported
+    strength: definitive
+  - test_no: 154
+    when: screenshots/videos attached
+    strength: definitive
+  - test_no: 155
+    when: conformance_result.json emitted
+    strength: definitive
+  - test_no: 156
+    when: bundle signed by Credimi/Forkbomb
+    strength: conditional
+  - test_no: 157
+    when: qualified timestamp added
+    strength: requires_external
+  emits_evidence_claims:
+  - wallet-certification-assurance-bundle
+  coverage_rules: []
+  evidence_artifacts:
+  - temporal_input_output
+  - step_inputs_outputs
+  - screenshots
+  - videos
+  - hash_manifest
+  - conformance_result_json
+  - pdf_report
+  notes:
+  - This aggregate should run after every pipeline, even when individual conformance helpers are not enabled.
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Recital 22
+    notes: Dependency analysis verifies whether assurance reports/certificates are available and adequate.
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Article 3
+    notes: Object of certification includes software, relevant hardware/platform assumptions, and processes supporting provision/operation.
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Article 8
+    notes: National certification schemes include cybersecurity, risk management, change/vulnerability management, operating
+      environment assumptions and evidence.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-403-1-V2-3-1
+    document_name: ETSI EN 319 403-1 V2.3.1 (2020-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31940301/02.03.01_60/en_31940301v020301p.pdf
+    paragraph: EN 319 403-1
+    notes: Conformity assessment requirements for TSPs.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-404-V1-1-1
+    document_name: ETSI TR 119 404 V1.1.1 (2023-02)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/119404/01.01.01_60/tr_119404v010101p.pdf
+    paragraph: TR 119 404
+    notes: NIS2 impact on eIDAS standards.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-401-V3-2-1
+    document_name: ETSI EN 319 401 V3.2.1 (2026-01)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/319401/03.02.01_60/en_319401v030201p.pdf
+    paragraph: EN 319 401
+    notes: General TSP policy requirements.
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://data.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Article 3 / Article 8 / Annex VI
+    notes: Certification object, certification schemes, evidence and dependency-analysis context.
+  - reference_type: eu_legal_act
+    id: EU-2025-849
+    document_name: Commission Implementing Regulation (EU) 2025/849 — List of certified Wallets
+    url: https://data.europa.eu/eli/reg_impl/2025/849/oj
+    paragraph: Recitals 3-4
+    notes: Machine-readable certified Wallet list and certification metadata context.
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-external-conformance-ingestion
+  title: External conformance result ingestion
+  actor_scope:
+  - wallet
+  - issuer
+  - verifier
+  - third_party_test_suite
+  objective: Run or ingest OpenID/WE BUILD/QTSP/lab results and normalize them into evidence claims.
+  recommended_execution:
+    primary_mode: external-adapter
+    credimi_support: third_party
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: run-or-import-external-suite
+    kind: external
+    outputs:
+    - external_raw_result
+  - step_id: map-external-assertions
+    kind: adapter
+    outputs:
+    - external_assertion_mapping
+  - step_id: normalize-result
+    kind: adapter
+    outputs:
+    - normalized_external_evidence_results
+  - step_id: attach-to-bundle
+    kind: result-aggregator
+    outputs:
+    - conformance_result_json
+  input_requirements:
+    required:
+    - external_suite_name
+    - external_suite_version
+    - external_raw_result
+  emits_flat_tests:
+  - test_no: 160
+    when: OpenID issuer suite result imported
+    strength: requires_external
+  - test_no: 161
+    when: OpenID verifier suite result imported
+    strength: requires_external
+  - test_no: 162
+    when: OpenID wallet/headless suite result imported
+    strength: requires_external
+  - test_no: 163
+    when: WE BUILD wallet test result imported
+    strength: requires_external
+  - test_no: 164
+    when: WE BUILD issuer trust result imported
+    strength: requires_external
+  - test_no: 165
+    when: WE BUILD RP trust result imported
+    strength: requires_external
+  - test_no: 166
+    when: qualified validation service result imported
+    strength: requires_external
+  - test_no: 167
+    when: CAB adequacy evidence imported
+    strength: requires_external
+  - test_no: 168
+    when: accessibility audit imported
+    strength: requires_external
+  - test_no: 169
+    when: cybersecurity certification evidence imported
+    strength: requires_external
+  - test_no: 170
+    when: QTSP conformity evidence imported
+    strength: requires_external
+  emits_evidence_claims:
+  - external-conformance-test-result-ingested
+  - wallet-certification-assurance-bundle
+  coverage_rules: []
+  evidence_artifacts:
+  - external_raw_result
+  - external_assertion_mapping
+  - normalized_external_evidence_results
+  notes: []
+  normative_references:
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Recital 22 and Annex VI
+    notes: Assurance documentation from other schemes/sources can be used if dependency analysis determines adequacy per requirement.
+  - reference_type: arf_requirement
+    id: EW-PIO-01-001
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_01
+    paragraph: OIA_01
+    notes: A Wallet Unit SHALL support [OpenID4VP] for remote presentation flows and [ISO/IEC 18013-5] for proximity presentation
+      flows, to receive and respond to presentation requests for person identification data (PID) and attes
+  - reference_type: arf_requirement
+    id: EW-PIO-01-003
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_03
+    paragraph: OIA_03
+    notes: When issuing, presenting, or verifying an attestation, Wallet Units, PID Providers, Attestation Providers, and
+      Relying Parties SHALL only use cryptographic algorithms included in the [ECCG Agreed Cryptographic Mechanisms
+  - reference_type: arf_requirement
+    id: EW-PIO-01-007
+    document_name: EUDI Architecture and Reference Framework — High-Level Requirements
+    url: https://eudi.dev/latest/annexes/annex-2/annex-2.02-high-level-requirements-by-topic/#:~:text=OIA_04
+    paragraph: OIA_04
+    notes: A Wallet Unit SHALL verify and process PID or attestation presentation requests from Relying Parties in accordance
+      with the protocols and interfaces specified in [OpenID4VP] for remote flows.
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Task 6 Wallet Conformance / Interop
+    notes: task6-wallet-conformance-interop/README.md
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Task 7 Testing and Validation
+    notes: task7-testing-validation/README.md
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Recital 22
+    notes: Dependency analysis verifies whether assurance reports/certificates are available and adequate.
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Article 3
+    notes: Object of certification includes software, relevant hardware/platform assumptions, and processes supporting provision/operation.
+  - reference_type: eu_legal_act
+    id: EU-2024-2981
+    document_name: Commission Implementing Regulation (EU) 2024/2981 — Wallet certification
+    url: https://eur-lex.europa.eu/eli/reg_impl/2024/2981/oj
+    paragraph: Article 8
+    notes: National certification schemes include cybersecurity, risk management, change/vulnerability management, operating
+      environment assumptions and evidence.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-403-1-V2-3-1
+    document_name: ETSI EN 319 403-1 V2.3.1 (2020-06)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/31940301/02.03.01_60/en_31940301v020301p.pdf
+    paragraph: EN 319 403-1
+    notes: Conformity assessment requirements for TSPs.
+  - reference_type: etsi_standard
+    id: ETSI-TR-119-404-V1-1-1
+    document_name: ETSI TR 119 404 V1.1.1 (2023-02)
+    url: https://www.etsi.org/deliver/etsi_tr/119400_119499/119404/01.01.01_60/tr_119404v010101p.pdf
+    paragraph: TR 119 404
+    notes: NIS2 impact on eIDAS standards.
+  - reference_type: etsi_standard
+    id: ETSI-EN-319-401-V3-2-1
+    document_name: ETSI EN 319 401 V3.2.1 (2026-01)
+    url: https://www.etsi.org/deliver/etsi_en/319400_319499/319401/03.02.01_60/en_319401v030201p.pdf
+    paragraph: EN 319 401
+    notes: General TSP policy requirements.
+  - reference_type: external_conformance
+    id: OPENID-CONFORMANCE
+    document_name: OpenID Foundation Conformance Certification
+    url: https://openid.net/certification/
+    paragraph: OpenID conformance suite
+    notes: External protocol conformance evidence source.
+  - reference_type: webuild_working_document
+    id: WE-BUILD-WP4
+    document_name: WE BUILD WP4 Trust Group
+    url: https://github.com/webuild-consortium/wp4-trust-group
+    paragraph: Task 6 / Task 7 conformance and testing material
+    notes: External or integrated trust/conformance evidence source.
+  normative_reference_policy:
+    scope: template_union
+    interpretation: This list contains the normative sources potentially touched by this aggregate template. At runtime, the
+      result aggregator should attach the subset relevant to emitted flat tests and metadata.
+    requires_unrolling: false
+    recommended_runtime_behavior:
+    - Start with the template-level normative reference union.
+    - Filter by emitted flat test numbers and metadata dimensions where rule mappings exist.
+    - Keep full template-level references available for traceability.
+    - Do not present all template refs as if every single one was exercised in a specific run.
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-siopv2-presentation-authentication
+  title: SIOPv2 presentation/authentication aggregate
+  actor_scope:
+  - wallet
+  - relying_party
+  - verifier
+  objective: Generate a SIOPv2 same-device or cross-device request, drive Wallet/SIOP invocation, and validate Self-Issued
+    ID Token and/or VP response.
+  recommended_execution:
+    primary_mode: stepci-plus-maestro-plus-verifier-helper
+    credimi_support: credimi_upcoming
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: generate-siopv2-request
+    kind: stepci
+    outputs:
+    - siopv2_request
+    - presentation_metadata
+  - step_id: wallet-process-siopv2-request
+    kind: maestro
+    outputs:
+    - maestro_flow_output
+    - screenshots
+    - assert_visible_result
+  - step_id: rp-validate-id-token-or-vp
+    kind: verifier-helper
+    outputs:
+    - id_token_validation_result
+    - verifier_result
+  emits_flat_tests:
+  - test_no: 171
+    when: siopv2_flow_type == same_device
+    strength: definitive
+  - test_no: 172
+    when: siopv2_flow_type == cross_device
+    strength: definitive
+  - test_no: 173
+    when: id_token_validation_result == pass
+    strength: definitive
+  - test_no: 174
+    when: rp_metadata_validation_enabled
+    strength: conditional
+  - test_no: 175
+    when: vp_response_inspected
+    strength: conditional
+  emits_evidence_claims:
+  - wallet-processes-siopv2-request
+  - rp-validates-self-issued-id-token
+  normative_references:
+  - reference_type: openid_profile
+    id: OPENID-SIOPV2-DRAFT13
+    document_name: Self-Issued OpenID Provider v2 — draft 13
+    url: https://openid.net/specs/openid-connect-self-issued-v2-1_0.html
+    paragraph: Sections 3-12
+    notes: SIOPv2 flow, discovery, RP registration, authorization request/response, ID Token validation and VP support.
+  - *id003
+  - *id002
+  evidence_artifacts:
+  - siopv2_request
+  - presentation_metadata
+  - maestro_flow_output
+  - screenshots
+  - assert_visible_result
+  - id_token_validation_result
+  - verifier_result
+  notes:
+  - Screenshots must be paired with Maestro assertVisible or equivalent command output.
+  normative_reference_policy:
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-mdoc-mdl-presentation-security
+  title: mDL/mdoc presentation and security aggregate
+  actor_scope:
+  - wallet
+  - reader
+  - verifier
+  objective: Run or inspect an mDL/mdoc presentation and validate device engagement, data retrieval and security mechanisms.
+  recommended_execution:
+    primary_mode: mdoc-helper-plus-maestro-where-ui-visible
+    credimi_support: credimi_upcoming
+    outside_credimi_required: true
+  pipeline_steps:
+  - step_id: reader-or-mdoc-request
+    kind: mdoc-helper
+    outputs:
+    - device_engagement_data
+    - reader_request
+  - step_id: wallet-user-flow
+    kind: maestro
+    outputs:
+    - maestro_flow_output
+    - screenshots
+    - assert_visible_result
+  - step_id: mdoc-response-validation
+    kind: mdoc-helper
+    outputs:
+    - mdoc_response
+    - issuer_data_authentication_result
+    - session_encryption_result
+    - reader_authentication_result
+  emits_flat_tests:
+  - test_no: 176
+    when: device_engagement_data present
+    strength: conditional
+  - test_no: 177
+    when: mdoc_response present
+    strength: conditional
+  - test_no: 178
+    when: session_encryption_result == pass
+    strength: requires_external
+  - test_no: 179
+    when: issuer_data_authentication_result == pass
+    strength: definitive
+  - test_no: 180
+    when: mdl_authentication_result == pass
+    strength: definitive
+  - test_no: 181
+    when: reader_authentication_fixture_used
+    strength: conditional
+  - test_no: 182
+    when: online_retrieval_tls_jws_validated
+    strength: definitive
+  emits_evidence_claims:
+  - mdoc-mdl-device-engagement-and-data-retrieval
+  - mdoc-mdl-security-mechanisms-validated
+  normative_references:
+  - reference_type: iso_standard_draft
+    id: ISO-IEC-DIS-18013-5-2020
+    document_name: ISO/IEC DIS 18013-5:2020(E) — Mobile driving licence application draft
+    url: https://www.iso.org/standard/69084.html
+    paragraph: Clauses 8-9 and Annex B
+    notes: Device engagement, data retrieval, security mechanisms and certificate profiles.
+  - *id003
+  - *id002
+  - reference_type: iso_standard_reference_only
+    id: ISO-18013-7
+    document_name: ISO/IEC 18013-7
+    url: https://www.iso.org/standard/82772.html#
+    paragraph: Reference-only
+    notes: Relevant to mdoc/mDL online presentation. Document not uploaded; no clause-level claims.
+  evidence_artifacts:
+  - device_engagement_data
+  - reader_request
+  - mdoc_response
+  - maestro_flow_output
+  - screenshots
+  - assert_visible_result
+  - session_encryption_result
+  - issuer_data_authentication_result
+  normative_reference_policy:
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+- template_id: agg-openid-federation-trust-resolution
+  title: OpenID Federation trust resolution aggregate
+  actor_scope:
+  - trust_infrastructure
+  - issuer
+  - relying_party
+  - wallet_provider
+  objective: Fetch entity configuration, resolve trust chains, apply metadata policy, validate trust marks and handle key
+    rollover/revocation.
+  recommended_execution:
+    primary_mode: trust-helper
+    credimi_support: credimi_upcoming
+    outside_credimi_required: false
+  pipeline_steps:
+  - step_id: fetch-entity-configuration
+    kind: trust-helper
+    outputs:
+    - entity_configuration
+  - step_id: fetch-subordinate-statements
+    kind: trust-helper
+    outputs:
+    - subordinate_statements
+  - step_id: resolve-trust-chain
+    kind: trust-helper
+    outputs:
+    - trust_chain
+    - trust_chain_validation_result
+  - step_id: apply-metadata-policy
+    kind: trust-helper
+    outputs:
+    - metadata_policy_result
+  - step_id: validate-trust-marks
+    kind: trust-helper
+    outputs:
+    - trust_mark_validation_result
+  - step_id: check-key-rollover-revocation
+    kind: trust-helper
+    outputs:
+    - key_rollover_status
+    - federation_revocation_status
+  emits_flat_tests:
+  - test_no: 183
+    when: entity_configuration validates
+    strength: definitive
+  - test_no: 184
+    when: trust_chain_validation_result == pass
+    strength: definitive
+  - test_no: 185
+    when: metadata_policy_result == pass
+    strength: definitive
+  - test_no: 186
+    when: trust_mark_validation_result == pass
+    strength: definitive
+  - test_no: 187
+    when: subordinate_statement_fetch == pass
+    strength: definitive
+  - test_no: 188
+    when: resolve_endpoint_result == pass
+    strength: definitive
+  - test_no: 189
+    when: key rollover/revocation fixture used
+    strength: conditional
+  - test_no: 190
+    when: automatic registration flow tested
+    strength: conditional
+  emits_evidence_claims:
+  - openid-federation-trust-chain-resolved
+  - openid-federation-metadata-policy-and-trust-marks-validated
+  normative_references:
+  - reference_type: openid_profile
+    id: OPENID-FEDERATION-1.0
+    document_name: OpenID Federation 1.0
+    url: https://openid.net/specs/openid-federation-1_0.html
+    paragraph: Sections 3-12
+    notes: Entity statements, trust chains, metadata policy, trust marks, endpoints, key rollover/revocation and registration.
+  - reference_type: openid_profile
+    id: OPENID-FEDERATION
+    document_name: OpenID Federation 1.0
+    url: https://openid.net/specs/openid-federation-1_0-45.html#section-
+    paragraph: Conformance-suite section links
+    notes: Federation trust-chain and metadata resolution.
+  evidence_artifacts:
+  - entity_configuration
+  - subordinate_statements
+  - trust_chain
+  - trust_chain_validation_result
+  - metadata_policy_result
+  - trust_mark_validation_result
+  normative_reference_policy:
+    source_scope: EUDI-targeted; Tier 3/4 OpenID Conformance Suite references excluded.
+business_logic_recommendation:
+  recommended_approach: template_plus_rules_engine
+  why_not_full_unroll:
+  - Full static unrolling of all credential_profile × format × algorithm × grant × trust-mode combinations would explode quickly
+    and become hard to maintain.
+  - The same pipeline pattern can cover many combinations if credential_metadata is recorded.
+  - New formats/algorithms can be added by updating metadata dimensions and rules rather than duplicating pipeline templates.
+  rule_engine_inputs:
+  - executed_aggregate_template_id
+  - step_statuses
+  - credential_metadata
+  - presentation_metadata
+  - trust_resolution_result
+  - verifier_result
+  - external_test_result
+  - artifact_presence
+  rule_engine_outputs:
+  - flat_test_results
+  - evidence_claim_results
+  - evidence_strength
+  - limitations
+  - required_followup_tests
+  minimal_algorithm:
+  - 1. Load aggregate template selected for the pipeline.
+  - 2. Collect all step outputs and conformance_context objects from Temporal.
+  - 3. Evaluate each emits_flat_tests.when expression.
+  - 4. Emit matching flat test result with strength and artifact references.
+  - 5. Emit mapped evidence_claim_results from the registry.
+  - 6. Apply strengthening/degradation rules, e.g. positive issuance gives conditional crypto verification; negative invalid-signature
+    rejection upgrades to definitive.
+  - 7. Attach limitations when internal Wallet behaviour was inferred rather than directly observed.
+normative_reference_model:
+  strategy: template-level union plus conditional refs
+  description: Each aggregated template contains a union of normative references derived from the evidence claims it can emit.
+    Individual emitted flat tests may use a subset of these references depending on metadata/rules. This avoids full static
+    unrolling.
+  fields:
+    reference_type: eu_legal_act | arf_requirement | webuild_working_document | etsi_standard | openid_profile | external_conformance
+    id: Stable source ID, e.g. EU-2024-2982, EW-PIO-01-003, ETSI-TS-119-472-3-V1-1-1
+    document_name: Human-readable document name
+    url: Official source or PDF URL
+    paragraph: Article, recital, annex, ARF index, ETSI deliverable/short reference, profile section, or working-document
+      section
+    notes: Why this reference matters for the template
+source_scope_file: credimi-conformance-source-scope-v1.1.yaml

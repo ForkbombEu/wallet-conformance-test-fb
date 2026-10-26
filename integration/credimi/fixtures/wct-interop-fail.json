@@ -1,0 +1,61 @@
+{
+  "contract_version": "1.0",
+  "run_id": "11111111-1111-4111-8111-111111111111",
+  "profile_id": "capture-interop-dev",
+  "category": "issuance",
+  "engine": {
+    "id": "pagopa-wct",
+    "upstream_repository": "https://github.com/pagopa/wallet-conformance-test",
+    "fork_repository": "https://github.com/ForkbombEu/wallet-conformance-test-fb",
+    "version": "synthetic-fixture",
+    "revision": "b728cca022bdf15d34fd515657901b4126b70ca1"
+  },
+  "execution": {
+    "status": "completed",
+    "started_at": "2026-10-26T12:00:00Z",
+    "finished_at": "2026-10-26T12:00:02Z",
+    "exit_code": 1
+  },
+  "selection": {
+    "ids": [
+      "credimi-issuance-smoke"
+    ]
+  },
+  "target": {
+    "actor_type": "issuer",
+    "actor_name": "Synthetic issuer",
+    "issuer_identifier": "https://issuer.example/issuers/eu-pid-device-bound"
+  },
+  "native": {
+    "sessions": [
+      {
+        "id": "synthetic-native-session",
+        "status": "FAILED"
+      }
+    ],
+    "assertions": [
+      {
+        "assertion_id": "fixture-assertion-1",
+        "full_title": "Synthetic interoperability assertion",
+        "ancestor_titles": [
+          "Synthetic fixture"
+        ],
+        "file": "synthetic.test.ts",
+        "phase": "issuance",
+        "native_status": "FAIL"
+      }
+    ],
+    "scenario_outcomes": [],
+    "native_suite_status": "FAILED",
+    "coverage_mode": "interoperability"
+  },
+  "summary": {
+    "result": "fail",
+    "assertion_count": 1,
+    "native_failed_assertion_count": 1
+  },
+  "artifacts": [],
+  "limitations": [
+    "Synthetic fixture; not a conformance execution."
+  ]
+}

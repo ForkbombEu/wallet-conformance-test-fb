@@ -2,7 +2,10 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { resolvePackageAssetPath } from "@/logic/runtime-paths";
+import {
+  resolvePackageAssetPath,
+  resolveWorkspacePath,
+} from "@/logic/runtime-paths";
 
 export function openDb(dbPath: string): DatabaseSync {
   if (dbPath !== ":memory:") {
@@ -16,6 +19,10 @@ export function openDb(dbPath: string): DatabaseSync {
 }
 
 export function resolveDbPath(): string {
+  const override = process.env.WCT_DB_PATH;
+  if (override) {
+    return resolveWorkspacePath(override);
+  }
   return resolvePackageAssetPath("data/wct.db");
 }
 

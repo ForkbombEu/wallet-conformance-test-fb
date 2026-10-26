@@ -1,0 +1,37 @@
+[
+  {
+    "repository": "ForkbombEu/itw-conformance-tool",
+    "default_branch": "main",
+    "commit": "550266b3541329644100eb9917687394da8e23f3",
+    "review_date": "2026-10-26",
+    "title": "chore: fix vulnerable dependencies reported by security assessment (#140)"
+  },
+  {
+    "repository": "ForkbombEu/wallet-conformance-test-fb",
+    "default_branch": "main",
+    "commit": "b728cca022bdf15d34fd515657901b4126b70ca1",
+    "review_date": "2026-10-26",
+    "title": "feat: add generic oid4vci interoperability mode"
+  },
+  {
+    "repository": "ForkbombEu/credimi",
+    "default_branch": "main",
+    "commit": "84e8c69f35bfa4ce4d3bfabc4c79e61263cec0a9",
+    "review_date": "2026-10-26",
+    "title": "chore(release): \ud83d\ude80 update VERSION to 1.318.1"
+  },
+  {
+    "repository": "ForkbombEu/eudi-conformance-evidence",
+    "default_branch": "main",
+    "commit": "2b172037f61a7d3bc4e16235cfeef21a8c8b0260",
+    "review_date": "2026-10-26",
+    "title": "feat(extraction): resolve offers and requests from a supplied deeplink (#9)"
+  },
+  {
+    "repository": "ForkbombEu/credimi-capture-wallet",
+    "default_branch": "master",
+    "commit": "2ccd2a3424f009705f65d2a13dfd9293e8ef41bc",
+    "review_date": "2026-10-26",
+    "title": "fix(issuer): never encrypt credential error responses"
+  }
+]

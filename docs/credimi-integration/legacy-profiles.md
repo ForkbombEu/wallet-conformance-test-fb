@@ -1,0 +1,73 @@
+# Legacy profiles and writable-path isolation
+
+This document describes the profile system for the legacy WCT runner and how
+writable outputs are isolated per-run.
+
+## Profile catalogue
+
+Profiles are defined in `src/runner-api/profiles.ts` with Zod validation.
+Each profile has:
+
+| Field | Description |
+| ----- | ----------- |
+| `id` | Safe lowercase identifier (`^[a-z0-9][a-z0-9_-]*$`) |
+| `configFile` | Native INI config file loaded by `loadConfigWithHierarchy` |
+| `category` | `issuance` or `presentation` |
+| `selections` | Logical selection entries mapped to reviewed test files |
+| `coverageMode` | `interoperability` (generic) or `it_wallet_profile` (Italian) |
+| `allowedAuthorizationInteraction` | Enum values this profile supports |
+| `initializedAssets` | Optional read-only seed assets |
+| `browserDriver` | Optional trusted browser driver config (prompt 18) |
+
+### First selection: `credimi-issuance-smoke`
+
+Mapped to `tests/credimi/issuance/credimi-flow.issuance.spec.ts` with
+`coverageMode: interoperability`. This is deliberately **not** Italian
+conformance — the generic smoke test has no Italian conformance assertions.
+
+## Typed run overrides
+
+Only these properties are accepted in `RunOverrides`:
+
+| Property | Constraint |
+| -------- | ---------- |
+| `issuer_url` | Absolute HTTPS URL |
+| `credential_offer_uri` | Valid credential offer URI, no newlines |
+| `credential_configuration_ids` | 1–16 nonempty unique strings, no newlines |
+| `authorization_interaction` | `auto`, `browser_redirect`, or `credential_presentation` |
+
+Unknown properties are rejected (`.strict()` on the Zod schema). Values
+containing newlines or INI section markers are rejected to prevent injection.
+
+## Browser driver gate
+
+A `browser_redirect` flow cannot run headless. Until prompt 18 supplies a
+trusted browser driver, the runner rejects starts requiring that interaction
+with `UNSUPPORTED_AUTHORIZATION_INTERACTION`.
+
+## Writable-path isolation
+
+All writable outputs are isolated per-run under a workspace directory:
+
+| Output | Config field / env | Default |
+| ------ | ------------------- | ------- |
+| SQLite DB + WAL/SHM | `WCT_DB_PATH` env | `data/wct.db` |
+| Log file | `logging.log_file` | `data/logs/test_run.log` |
+| Saved credentials | `wallet.credentials_storage_path` | `data/credentials/` |
+| Wallet attestations | `wallet.wallet_attestations_storage_path` | `data/attestation/` |
+| Backup | `wallet.backup_storage_path` | `data/backup/` |
+| TLS certs | `trust_anchor.tls_cert_dir` | `data/backup/` |
+| JWK keys | Caller-supplied (config-derived) | via `src/logic/jwk.ts` |
+| PEM certs | Caller-supplied (config-derived) | via `src/logic/pem.ts` |
+
+The `buildEffectiveConfig` function in `src/runner-api/effective-config.ts`
+resolves all writable paths under the run's workspace directory, ensuring
+fresh per-run isolation.
+
+## Stale config warning
+
+`config.credimi-direct.ini` is stale. Capture now uses path-based issuers
+(e.g. `/issuers/eu-pid-device-bound`). Do not hardcode the old root URL or
+`urn:eu.europa.ec.eudi:pid:1.jwt`. Use operator-discovered supported IDs
+instead. Do not use `trust_anchor.verify=false` or
+`NODE_TLS_REJECT_UNAUTHORIZED=0` as a universal compatibility switch.

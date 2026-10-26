@@ -3,11 +3,26 @@ import { promisify } from "node:util";
 
 import type { Config } from "@/types";
 
+import {
+  callEngagementFactory,
+  type EngagementFactoryConfig,
+} from "./engagement-factory";
+
 const execFileAsync = promisify(execFile);
 
 export async function getAuthorizeRequestUrl(
   presentation: Config["presentation"],
+  factoryConfig?: EngagementFactoryConfig,
 ): Promise<string> {
+  if (factoryConfig) {
+    if (presentation.authorize_request_script) {
+      throw new Error(
+        "Ambiguous configuration: engagementFactory and authorize_request_script are both set",
+      );
+    }
+    return await callEngagementFactory(factoryConfig);
+  }
+
   const script = presentation.authorize_request_script;
   if (script) {
     return await runAuthorizeRequestScript(script);

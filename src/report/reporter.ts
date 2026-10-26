@@ -1,12 +1,23 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { TestResult } from "vitest/node";
 import type { Reporter } from "vitest/reporters";
 
 import { randomUUID } from "node:crypto";
-import { TestResult } from "vitest/node.js";
+import { mkdirSync } from "node:fs";
 
-import type { ConformanceCheck } from "@/report/types";
+import type { ConformanceCheck, Phase } from "@/report/types";
 
 import { openDb, resolveDbPath } from "@/report/db";
+import {
+  buildNativeExport,
+  type NativeAssertion,
+  type NativeExport,
+  writeNativeExport,
+} from "@/report/native-export";
+import {
+  extractDescription,
+  extractRequirementId,
+} from "@/report/requirement-id";
 import {
   appendCheck,
   closeSession,
@@ -20,17 +31,20 @@ type ReporterTestCase = Parameters<
 >[0];
 
 type SessionStatus = "FAILED" | "INCOMPLETE" | "PASSED";
-type TestType = "issuance" | "presentation";
+type TestType = Phase;
 
-// Example IT Wallet Test Matrix IDs -> CI_002 or RPR-001
-const REQUIREMENT_ID_PATTERN = /^([A-Z]+[-_]\d+\w*)\s*:/;
 const DEFAULT_ENTITY_NAME = "-";
 
 export class ConformanceReporter implements Reporter {
   private checkResults: CheckResult[] = [];
+  private collectedAssertions: NativeAssertion[] = [];
   private db: DatabaseSync | undefined;
   private sessionId: string | undefined;
   private readonly testType: TestType;
+
+  private get exportEnabled(): boolean {
+    return Boolean(process.env.WCT_RESULTS_DIR && process.env.WCT_RUN_ID);
+  }
 
   constructor(testType: TestType) {
     this.testType = testType;
@@ -42,11 +56,14 @@ export class ConformanceReporter implements Reporter {
     }
 
     const title = testCase.name;
-    const result = this.mapResult(testCase.result().state);
+    const vitestStatus = testCase.result().state;
+    const result = this.mapResult(vitestStatus);
+    const requirementId = extractRequirementId(title);
+    const description = extractDescription(title);
     const check: ConformanceCheck = {
-      description: this.parseTestCaseName(title),
+      description,
       phase: this.testType,
-      requirementId: this.parseRequirementId(title),
+      requirementId: requirementId ?? title,
       result,
       timestamp: new Date().toISOString(),
     };
@@ -57,6 +74,21 @@ export class ConformanceReporter implements Reporter {
 
     appendCheck(this.db, this.sessionId, check);
     this.checkResults.push(result);
+
+    if (this.exportEnabled) {
+      this.collectedAssertions.push({
+        ancestorTitles: extractAncestorTitles(testCase),
+        description,
+        errorMessage: check.errorMessage ?? null,
+        file: testCase.module.moduleId,
+        nativeStatus: result,
+        phase: this.testType,
+        requirementId,
+        timestamp: check.timestamp,
+        title,
+        vitestStatus,
+      });
+    }
   }
 
   onTestRunEnd(): void {
@@ -69,12 +101,17 @@ export class ConformanceReporter implements Reporter {
     this.db.close();
 
     console.log(`Conformance session ID: ${this.sessionId}`);
+
+    if (this.exportEnabled) {
+      this.writeNativeResults(status);
+    }
   }
 
   onTestRunStart(): void {
     this.db = openDb(resolveDbPath());
     this.sessionId = randomUUID();
     this.checkResults = [];
+    this.collectedAssertions = [];
 
     createSession(this.db, {
       entityName: DEFAULT_ENTITY_NAME,
@@ -118,15 +155,6 @@ export class ConformanceReporter implements Reporter {
     return "NOT_REACHED";
   }
 
-  private parseRequirementId(title: string): string {
-    const requirement = REQUIREMENT_ID_PATTERN.exec(title)?.[1];
-    return requirement ?? title;
-  }
-
-  private parseTestCaseName(name: string): string {
-    return name.replace(REQUIREMENT_ID_PATTERN, "").trim();
-  }
-
   private resolveFinalStatus(results: readonly CheckResult[]): SessionStatus {
     if (results.includes("FAIL")) {
       return "FAILED";
@@ -138,4 +166,43 @@ export class ConformanceReporter implements Reporter {
 
     return "PASSED";
   }
+
+  private writeNativeResults(dbStatus: SessionStatus): void {
+    const outputDir = process.env.WCT_RESULTS_DIR;
+    const runId = process.env.WCT_RUN_ID;
+
+    if (!outputDir || !runId || !this.sessionId) {
+      return;
+    }
+
+    const startedAt =
+      this.collectedAssertions[0]?.timestamp ?? new Date().toISOString();
+
+    const exportStatus: NativeExport["status"] =
+      this.collectedAssertions.length === 0 ? "INCOMPLETE" : dbStatus;
+
+    const data = buildNativeExport({
+      assertions: this.collectedAssertions,
+      closedAt: new Date().toISOString(),
+      phase: this.testType,
+      runId,
+      sessionId: this.sessionId,
+      startedAt,
+      status: exportStatus,
+    });
+
+    mkdirSync(outputDir, { recursive: true });
+    writeNativeExport(outputDir, data);
+    console.log(`Native results written to ${outputDir}`);
+  }
+}
+
+function extractAncestorTitles(testCase: ReporterTestCase): string[] {
+  const ancestors: string[] = [];
+  let current = testCase.parent;
+  while (current.type === "suite") {
+    ancestors.unshift(current.name);
+    current = current.parent;
+  }
+  return ancestors;
 }

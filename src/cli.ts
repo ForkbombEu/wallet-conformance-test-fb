@@ -9,29 +9,23 @@
 import { Command } from "commander";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import type { CliOptions } from "@/logic";
 
-import { packageRoot, readPackageVersion } from "@/logic/runtime-paths";
-
-const nodeRequire = createRequire(import.meta.url);
-const experimentalWarningFlag = "--disable-warning=ExperimentalWarning";
-
-function applyEnvOption(
-  env: NodeJS.ProcessEnv,
-  key: string,
-  value: boolean | number | string | undefined,
-): void {
-  if (value !== undefined) {
-    env[key] = String(value);
-  }
-}
+import { readPackageVersion } from "@/logic/runtime-paths";
+import {
+  getNodeOptionsWithExperimentalWarningDisabled,
+  resolveVitestBin,
+  resolveVitestConfigPath,
+  setEnvFromOptions,
+} from "@/logic/test-command";
 
 function ensureExperimentalWarningsDisabled(): void {
   if (
-    process.env.NODE_OPTIONS?.split(/\s+/).includes(experimentalWarningFlag)
+    process.env.NODE_OPTIONS?.split(/\s+/).includes(
+      "--disable-warning=ExperimentalWarning",
+    )
   ) {
     return;
   }
@@ -50,27 +44,19 @@ function ensureExperimentalWarningsDisabled(): void {
   process.exit(result.status ?? 1);
 }
 
-function getNodeOptionsWithExperimentalWarningDisabled(
-  nodeOptions: string | undefined,
-): string {
-  return [nodeOptions, experimentalWarningFlag].filter(Boolean).join(" ");
-}
-
 function runTestCommand(
   script: "test:issuance" | "test:presentation",
   options: CliOptions,
 ) {
   const env = setEnvFromOptions(options);
   const tests = env.TESTS?.split(/\s*,\s*/g).filter((i) => i.length > 0) ?? [];
-  const configFile =
-    script === "test:issuance"
-      ? "vitest.issuance.config.js"
-      : "vitest.presentation.config.js";
-  const vitestBin = nodeRequire.resolve("vitest/vitest.mjs");
+  const category = script === "test:issuance" ? "issuance" : "presentation";
+  const configPath = resolveVitestConfigPath(category);
+  const vitestBin = resolveVitestBin();
 
   const result = spawnSync(
     process.execPath,
-    [vitestBin, "run", "--config", join(packageRoot, configFile), ...tests],
+    [vitestBin, "run", "--config", configPath, ...tests],
     {
       env,
       shell: process.platform === "win32",
@@ -88,91 +74,6 @@ function runTestCommand(
  * @param options Commander options object
  * @returns Updated environment object
  */
-function setEnvFromOptions(options: CliOptions): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-
-  env.NODE_OPTIONS = getNodeOptionsWithExperimentalWarningDisabled(
-    env.NODE_OPTIONS,
-  );
-
-  if (options.fileIni) {
-    env.CONFIG_FILE_INI = resolve(process.cwd(), options.fileIni);
-  }
-
-  applyEnvOption(
-    env,
-    "CONFIG_CREDENTIAL_ISSUER_URI",
-    options.credentialIssuerUri,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_CREDENTIAL_OFFER_URI",
-    options.credentialOfferUri,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_PRESENTATION_AUTHORIZE_URI",
-    options.presentationAuthorizeUri,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_PRESENTATION_AUTHORIZE_SCRIPT",
-    options.presentationAuthorizeScript,
-  );
-  applyEnvOption(env, "CONFIG_CREDENTIAL_TYPES", options.credentialTypes);
-  applyEnvOption(env, "CONFIG_ECOSYSTEM", options.ecosystem);
-  applyEnvOption(
-    env,
-    "CONFIG_AUTHORIZATION_INTERACTION",
-    options.authorizationInteraction,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_CLIENT_AUTHENTICATION",
-    options.clientAuthentication,
-  );
-  applyEnvOption(env, "CONFIG_TIMEOUT", options.timeout);
-  applyEnvOption(env, "CONFIG_MAX_RETRIES", options.maxRetries);
-  applyEnvOption(env, "CONFIG_LOG_LEVEL", options.logLevel);
-  applyEnvOption(env, "CONFIG_LOG_FILE", options.logFile);
-  applyEnvOption(env, "CONFIG_PORT", options.port);
-  applyEnvOption(env, "CONFIG_SAVE_CREDENTIAL", options.saveCredential);
-  applyEnvOption(env, "CONFIG_ISSUANCE_TESTS_DIR", options.issuanceTestsDir);
-  applyEnvOption(
-    env,
-    "CONFIG_ISSUANCE_CERTIFICATE_SUBJECT",
-    options.issuanceCertificateSubject,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_PRESENTATION_TESTS_DIR",
-    options.presentationTestsDir,
-  );
-  applyEnvOption(env, "CONFIG_STEPS_MAPPING", options.stepsMapping);
-  applyEnvOption(env, "CONFIG_UNSAFE_TLS", options.unsafeTls);
-  applyEnvOption(env, "TESTS", options.tests);
-  applyEnvOption(env, "CONFIG_WALLET_VERSION", options.walletVersion);
-  applyEnvOption(
-    env,
-    "CONFIG_REFRESH_TOKEN_REISSUANCE",
-    options.refreshTokenReissuance,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_CREDENTIAL_CONFIGURATION_ID_REISSUANCE",
-    options.credentialConfigurationIdReissuance,
-  );
-  applyEnvOption(
-    env,
-    "CONFIG_REFRESH_TOKEN_DEFERRED",
-    options.refreshTokenDeferred,
-  );
-  applyEnvOption(env, "CONFIG_TRANSACTION_ID", options.transactionId);
-  applyEnvOption(env, "CONFIG_TRUST_ANCHOR_VERIFY", options.trustAnchorVerify);
-
-  return env;
-}
-
 const program = new Command();
 
 program

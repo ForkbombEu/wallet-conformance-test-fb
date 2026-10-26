@@ -1,0 +1,139 @@
+version: '1.1'
+name: Credimi Conformance Source Scope
+purpose: EUDI-focused scope policy for Credimi conformance artifacts. Prevents importing the whole OpenID Conformance Suite
+  catalogue when only a subset is relevant to EUDI.
+included_core:
+- id: EUDI-LEGAL
+  name: EUDI/eIDAS legal acts and Commission Implementing Regulations
+  reason: Primary legal/normative basis.
+- id: EUDI-ARF-LATEST
+  name: EUDI Architecture and Reference Framework latest
+  url: https://eudi.dev/latest/
+  reason: Primary legal-to-technical bridge.
+- id: WE-BUILD-WP4
+  name: WE BUILD WP4 trust/conformance work
+  url: https://github.com/webuild-consortium/wp4-trust-group
+  reason: Partner/pilot trust and conformance material.
+- id: ETSI-ESI-RELEVANT
+  name: ETSI ESI standards relevant to EUDI
+  reason: Trust-helper, certificate, validation, timestamping, EAA/PID and RP-attribute layer.
+included_openid_eudi_core:
+- prefix: OID4VCI-1FINAL-
+  id: OID4VCI-1FINAL
+  name: OpenID for Verifiable Credential Issuance 1.0
+  url_template: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#section-
+  reason: Core EUDI credential issuance protocol.
+- prefix: OID4VP-1FINAL-
+  id: OID4VP-1FINAL
+  name: OpenID for Verifiable Presentations 1.0
+  url_template: https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#section-
+  reason: Core EUDI presentation protocol.
+- prefix: HAIP-
+  id: HAIP
+  name: OpenID4VC High Assurance Interoperability Profile 1.0
+  url_template: https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html#section-
+  reason: High-assurance OpenID4VC interoperability; very relevant to EUDI.
+- prefix: HAIPA-
+  id: HAIP-APPENDIX
+  name: OpenID4VC High Assurance Interoperability Profile appendices
+  url_template: https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html#appendix-
+  reason: HAIP appendix references.
+- prefix: SDJWT-
+  id: SDJWT
+  name: Selective Disclosure for JWTs
+  url_template: https://www.ietf.org/archive/id/draft-ietf-oauth-selective-disclosure-jwt-14.html#section-
+  reason: Core SD-JWT mechanism.
+- prefix: SDJWTVC-
+  id: SDJWTVC
+  name: SD-JWT-based Verifiable Credentials
+  url_template: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-13.html#section-
+  reason: SD-JWT VC credential format.
+- prefix: OTSL-
+  id: OAUTH-STATUS-LIST
+  name: OAuth Status List
+  url_template: https://datatracker.ietf.org/doc/html/draft-ietf-oauth-status-list-15#section-
+  reason: Status/revocation where used.
+- prefix: OIDFED-
+  id: OPENID-FEDERATION
+  name: OpenID Federation 1.0
+  url_template: https://openid.net/specs/openid-federation-1_0-45.html#section-
+  reason: Optional/partner-driven federation trust; adoption uncertain but relevant.
+- prefix: ISO18013-7-
+  id: ISO-18013-7
+  name: ISO/IEC 18013-7
+  url_template: https://www.iso.org/standard/82772.html#
+  reason: Reference-only for mdoc/mDL online presentation; document not uploaded.
+included_supporting_only_if_directly_used:
+- prefix: RFC7636-
+  id: RFC7636
+  name: PKCE
+  url_template: https://tools.ietf.org/html/rfc7636#section-
+  reason: Only when OID4VCI/OAuth authorization-code tests use PKCE.
+- prefix: PAR-
+  id: RFC9126
+  name: Pushed Authorization Requests
+  url_template: https://www.rfc-editor.org/rfc/rfc9126.html#section-
+  reason: Only when flow uses PAR.
+- prefix: JAR-
+  id: RFC9101
+  name: JWT Secured Authorization Request
+  url_template: https://www.rfc-editor.org/rfc/rfc9101.html#section-
+  reason: Only when request objects/JAR are used.
+- prefix: JARM-
+  id: JARM
+  name: JWT Secured Authorization Response Mode
+  url_template: https://openid.net/specs/oauth-v2-jarm.html#section-
+  reason: Only when flow uses JARM.
+- prefix: DPOP-
+  id: RFC9449
+  name: DPoP
+  url_template: https://www.rfc-editor.org/rfc/rfc9449#section-
+  reason: Only when proof-of-possession evidence is needed.
+- prefix: RFC8414-
+  id: RFC8414
+  name: OAuth 2.0 Authorization Server Metadata
+  url_template: https://tools.ietf.org/html/rfc8414#section-
+  reason: Only for metadata discovery/validation checks.
+- prefix: OIDCD-
+  id: OIDC-DISCOVERY
+  name: OpenID Connect Discovery 1.0
+  url_template: https://openid.net/specs/openid-connect-discovery-1_0.html#rfc.section.
+  reason: Only for OIDC discovery metadata checks.
+- prefix: OIDCR-
+  id: OIDC-DYNAMIC-REGISTRATION
+  name: OpenID Connect Dynamic Client Registration 1.0
+  url_template: https://openid.net/specs/openid-connect-registration-1_0.html#rfc.section.
+  reason: Only for RP/client registration tests.
+- prefix: RFC7517-
+  id: RFC7517
+  name: JSON Web Key
+  url_template: https://tools.ietf.org/html/rfc7517#section-
+  reason: Only when validating JWKS/JWK material.
+- prefix: RFC7518-
+  id: RFC7518
+  name: JSON Web Algorithms
+  url_template: https://tools.ietf.org/html/rfc7518#section-
+  reason: Only when validating JOSE algorithms.
+- prefix: RFC7519-
+  id: RFC7519
+  name: JSON Web Token
+  url_template: https://tools.ietf.org/html/rfc7519#section-
+  reason: Only when validating JWT structures/tokens.
+- prefix: OAuth2-iss-
+  id: RFC9207
+  name: OAuth 2.0 Authorization Server Issuer Identification
+  url_template: https://tools.ietf.org/html/rfc9207#section-
+  reason: Only if issuer identification is used.
+excluded_for_now:
+- FAPI / financial-grade API profiles unless explicitly required by HAIP or an EUDI deployment profile
+- CIBA and Open Banking profiles
+- Brazil Open Finance / UK Open Banking / Australia CDR / KSA / CBUAE regional profiles
+- ConnectID profiles
+- CAEP/RISC/Shared Signals
+- AuthZEN
+- General OpenID Conformance Suite specs not directly touched by EUDI-targeted Wallet/Issuer/Verifier tests
+policy:
+- Do not add an OpenID/OAuth/OIDC source merely because the OpenID Conformance Suite knows about it.
+- Add supporting dependencies only when a concrete EUDI-targeted test or aggregate uses them.
+- OpenID Federation is included as partner-relevant but labelled optional/uncertain-adoption.
+- ISO 18013-7 is reference-only until the document is available.

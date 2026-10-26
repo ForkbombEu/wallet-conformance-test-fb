@@ -1,0 +1,32 @@
+{
+  "$comment": "Example profile catalogue for the Credimi runner. Replace placeholder values with operator-discovered configuration. Do NOT use the stale config.credimi-direct.ini values.",
+  "profiles": [
+    {
+      "id": "credimi-issuance-smoke",
+      "configFile": "config.credimi.ini",
+      "category": "issuance",
+      "coverageMode": "interoperability",
+      "allowedAuthorizationInteraction": ["auto", "browser_redirect"],
+      "selections": [
+        {
+          "id": "credimi-issuance-smoke",
+          "testFile": "tests/credimi/issuance/credimi-flow.issuance.spec.ts",
+          "description": "Generic OID4VCI interoperability smoke — NOT Italian conformance"
+        }
+      ],
+      "initializedAssets": [],
+      "$comment": "browserDriver is omitted until prompt 18 supplies a trusted browser driver. browser_redirect will be rejected with UNSUPPORTED_AUTHORIZATION_INTERACTION until then."
+    }
+  ],
+  "$writablePaths": {
+    "$comment": "Per-run writable paths are resolved under the workspace directory. These config fields isolate each writable output.",
+    "db": "WCT_DB_PATH env var (default: data/wct.db)",
+    "logs": "logging.log_file config",
+    "credentials": "wallet.credentials_storage_path config",
+    "backup": "wallet.backup_storage_path config",
+    "attestations": "wallet.wallet_attestations_storage_path config",
+    "tlsCerts": "trust_anchor.tls_cert_dir config",
+    "jwkKeys": "Caller-supplied paths from config-derived directories (src/logic/jwk.ts)",
+    "pemCerts": "Caller-supplied paths from config-derived directories (src/logic/pem.ts)"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "contract_version": "1.0",
+  "profile_id": "capture-interop-dev",
+  "category": "issuance",
+  "selection": {
+    "ids": [
+      "credimi-issuance-smoke"
+    ]
+  },
+  "target": {
+    "actor_type": "issuer",
+    "actor_name": "Synthetic issuer",
+    "issuer_identifier": "https://issuer.example/issuers/eu-pid-device-bound"
+  },
+  "timeout_ms": 600000,
+  "parameters": {}
+}

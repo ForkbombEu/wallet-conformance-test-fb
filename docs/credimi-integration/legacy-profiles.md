@@ -87,6 +87,55 @@ is the sole source of truth.
 Local callback URLs (`http://localhost:{port}/cb`) are only reachable from a
 browser in the same network namespace. Remote device usage is not supported.
 
+## Tested commands
+
+### Runner API tests (offline, no public dependencies)
+
+```bash
+pnpm exec vitest run --config vitest.runner-api.config.ts
+```
+
+Covers: contract validation, summary aggregation, job store persistence,
+job manager lifecycle, native worker process adapter, HTTP API routes,
+artifact serving, engagement factory, authorization driver, acceptance
+integration.
+
+### Types, build, lint, format
+
+```bash
+pnpm types:check
+pnpm build
+pnpm format:check
+pnpm lint:check
+```
+
+### Start the runner API (compiled)
+
+```bash
+CREDIMI_RUNNER_TOKEN=<token> node dist/src/runner-api/main.js
+```
+
+Binds to `127.0.0.1:8789` by default.
+
+### Live recipe (NOT automatic — requires explicit endpoint)
+
+Prerequisites:
+1. Local WCT TA/WP/mock-issuer certificates and host entries
+2. Public issuer reachability (Capture or configured issuer)
+3. Browser driver configured in profile (for `browser_redirect` flows)
+
+To run against Capture:
+1. Create a fresh `/sessions` issuance fixture with explicit
+   `issuer_configuration_id` and `credential_configuration_id`
+2. Bind the generated offer and path-based `issuer_identifier` into the
+   WCT profile/request (do NOT reuse stale `config.credimi-direct.ini`)
+3. Verify wallet proof/client auth supports the selected fixture
+4. If using `jwt-proof-only` diagnostic fixture, label the run
+   `interoperability` and document limitations
+5. Run only against an explicitly supplied endpoint
+
+Do not change host files automatically or disable trust verification.
+
 ## Stale config warning
 
 `config.credimi-direct.ini` is stale. Capture now uses path-based issuers

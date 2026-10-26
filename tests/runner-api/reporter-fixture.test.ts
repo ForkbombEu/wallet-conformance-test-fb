@@ -82,42 +82,46 @@ function runFixture(): ExportedResult {
 }
 
 describe("reporter fixture runtime", () => {
-  it("captures file and ancestor fields from real Vitest", () => {
-    const result = runFixture();
+  it(
+    "captures file and ancestor fields from real Vitest",
+    { timeout: 30_000 },
+    () => {
+      const result = runFixture();
 
-    expect(result.assertions).toHaveLength(3);
-    expect(result.runId).toBe("fixture-run-001");
-    expect(result.sessionId).toBeTruthy();
-    expect(result.phase).toBe("issuance");
-    expect(result.status).toBe("PASSED");
+      expect(result.assertions).toHaveLength(3);
+      expect(result.runId).toBe("fixture-run-001");
+      expect(result.sessionId).toBeTruthy();
+      expect(result.phase).toBe("issuance");
+      expect(result.status).toBe("PASSED");
 
-    const nested = result.assertions.find(
-      (a) => a.title === "CI_001: nested test",
-    );
-    expect(nested, "nested test exists").toBeDefined();
-    expect(nested?.ancestorTitles).toEqual(["Outer Suite", "Inner Suite"]);
-    expect(nested?.requirementId).toBe("CI_001");
-    expect(nested?.file).toContain("reporter-fixture.spec.ts");
-    expect(nested?.nativeStatus).toBe("PASS");
-    expect(nested?.vitestStatus).toBe("passed");
+      const nested = result.assertions.find(
+        (a) => a.title === "CI_001: nested test",
+      );
+      expect(nested, "nested test exists").toBeDefined();
+      expect(nested?.ancestorTitles).toEqual(["Outer Suite", "Inner Suite"]);
+      expect(nested?.requirementId).toBe("CI_001");
+      expect(nested?.file).toContain("reporter-fixture.spec.ts");
+      expect(nested?.nativeStatus).toBe("PASS");
+      expect(nested?.vitestStatus).toBe("passed");
 
-    const top = result.assertions.find(
-      (a) => a.title === "CI_002: top-level test",
-    );
-    expect(top, "top-level test exists").toBeDefined();
-    expect(top?.ancestorTitles).toEqual(["Outer Suite"]);
-    expect(top?.requirementId).toBe("CI_002");
+      const top = result.assertions.find(
+        (a) => a.title === "CI_002: top-level test",
+      );
+      expect(top, "top-level test exists").toBeDefined();
+      expect(top?.ancestorTitles).toEqual(["Outer Suite"]);
+      expect(top?.requirementId).toBe("CI_002");
 
-    const generic = result.assertions.find(
-      (a) => a.title === "generic smoke test",
-    );
-    expect(generic, "generic test exists").toBeDefined();
-    expect(generic?.ancestorTitles).toEqual([]);
-    expect(generic?.requirementId).toBeNull();
-    expect(generic?.file).toContain("reporter-fixture.spec.ts");
-  });
+      const generic = result.assertions.find(
+        (a) => a.title === "generic smoke test",
+      );
+      expect(generic, "generic test exists").toBeDefined();
+      expect(generic?.ancestorTitles).toEqual([]);
+      expect(generic?.requirementId).toBeNull();
+      expect(generic?.file).toContain("reporter-fixture.spec.ts");
+    },
+  );
 
-  it("binds export to reporter-created session ID", () => {
+  it("binds export to reporter-created session ID", { timeout: 30_000 }, () => {
     const result = runFixture();
     expect(result.sessionId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,

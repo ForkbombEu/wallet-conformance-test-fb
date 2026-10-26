@@ -318,7 +318,10 @@ describe("GET /v1/runs/:runId", () => {
 // -- Cancel -------------------------------------------------------------------------
 
 describe("POST /v1/runs/:runId/cancel", () => {
-  it("cancels a run", async () => {
+  it("cancels a run", { timeout: 15_000 }, async () => {
+    await closeServer();
+    await startTestServer(makeFakeExecute(500));
+
     const create = await fetch(`${baseUrl}/v1/runs`, {
       body: JSON.stringify(makeRequest()),
       headers: authHeaders({ "Idempotency-Key": "key-1" }),

@@ -39,11 +39,22 @@ export type AuthorizationInteraction = z.infer<
   typeof authorizationInteractionSchema
 >;
 
+const authorizationDriverConfigSchema = z
+  .object({
+    modulePath: z.string().min(1),
+    type: z.literal("puppeteer"),
+  })
+  .strict();
+export type AuthorizationDriverConfig = z.infer<
+  typeof authorizationDriverConfigSchema
+>;
+
 const profileSchema = z
   .object({
     allowedAuthorizationInteraction: z
       .array(authorizationInteractionSchema)
       .min(1),
+    authorizationDriver: authorizationDriverConfigSchema.optional(),
     browserDriver: browserDriverConfigSchema.optional(),
     category: z.enum(["issuance", "presentation"]),
     configFile: z.string().min(1),

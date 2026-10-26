@@ -64,6 +64,29 @@ The `buildEffectiveConfig` function in `src/runner-api/effective-config.ts`
 resolves all writable paths under the run's workspace directory, ensuring
 fresh per-run isolation.
 
+## Authorization driver
+
+The profile may specify an `authorizationDriver` for automated browser-based
+authorization flows. The driver config is operator-owned and cannot be supplied
+via HTTP request parameters.
+
+| Field | Description |
+| ----- | ----------- |
+| `type` | Must be `"puppeteer"` |
+| `modulePath` | Path to an operator-owned ES module implementing `driveAuthorization({page, authorizationUrl, redirectUri, signal})` |
+
+When no driver is configured, the CLI mode uses the system browser (`xdg-open`,
+`open`, `start`). In runner mode, a `browser_redirect` profile without a
+configured driver is rejected before spawning the test suite.
+
+The driver receives the authorization URL and must perform target-specific
+navigation/approval/login in the Puppeteer page. It must not fabricate
+authorization codes or set suite verdicts — the callback server's OAuth result
+is the sole source of truth.
+
+Local callback URLs (`http://localhost:{port}/cb`) are only reachable from a
+browser in the same network namespace. Remote device usage is not supported.
+
 ## Stale config warning
 
 `config.credimi-direct.ini` is stale. Capture now uses path-based issuers

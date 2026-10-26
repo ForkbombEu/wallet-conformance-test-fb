@@ -13,6 +13,8 @@ import { DcqlQuery } from "dcql";
 import { exec } from "node:child_process";
 import { platform } from "node:os";
 
+import type { AuthorizationDriver } from "@/logic/authorization-driver";
+
 import { startCallbackServer } from "@/logic/callback-server";
 import { getCallbackRedirectUri } from "@/logic/constants";
 import { createVerifyJwtCallback, getEncryptJweCallback } from "@/logic/jwt";
@@ -97,17 +99,29 @@ export class AuthorizeDefaultStep extends StepFlow {
   async handlePidFlow({
     authorizeUrl,
     callbackPort,
+    driver,
     redirectUri,
   }: {
     authorizeUrl: string;
     callbackPort: number;
+    driver?: AuthorizationDriver;
     redirectUri: string;
   }): Promise<AuthorizeExecuteResponse> {
     this.log.debug(`Starting callback server on ${redirectUri}`);
     const callbackPromise = startCallbackServer(callbackPort);
 
-    this.log.info(`Opening browser at: ${authorizeUrl}`);
-    openBrowser(authorizeUrl);
+    if (driver) {
+      this.log.info(`Driving authorization via driver: ${authorizeUrl}`);
+      await driver.driveAuthorization({
+        authorizationUrl: authorizeUrl,
+        redirectUri,
+        runId: "",
+        signal: new AbortController().signal,
+      });
+    } else {
+      this.log.info(`Opening browser at: ${authorizeUrl}`);
+      openBrowser(authorizeUrl);
+    }
 
     this.log.info(
       "Waiting for the authorization callback... Complete the authentication flow in your browser.",

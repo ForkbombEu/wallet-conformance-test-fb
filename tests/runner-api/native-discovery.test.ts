@@ -14,9 +14,9 @@ import type { RunRequest } from "../../src/runner-api/contract";
 
 function makeProfile(): Profile {
   return {
-    allowedScenarioIds: ["credimi-issuance-smoke"],
+    allowedAuthorizationInteraction: ["auto"],
     category: "issuance",
-    configPath: "/abs/config.ini",
+    configFile: "/abs/config.ini",
     coverageMode: "interoperability",
     id: "test-profile",
     selections: [
@@ -25,7 +25,7 @@ function makeProfile(): Profile {
         testFile: "tests/credimi/issuance/credimi-flow.issuance.spec.ts",
       },
     ],
-  } as Profile;
+  };
 }
 
 function makeRequest(): RunRequest {

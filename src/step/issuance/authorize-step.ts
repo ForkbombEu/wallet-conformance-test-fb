@@ -15,7 +15,7 @@ import { platform } from "node:os";
 
 import type { AuthorizationDriver } from "@/logic/authorization-driver";
 
-import { startCallbackServer } from "@/logic/callback-server";
+import { openCallbackServer } from "@/logic/callback-server";
 import { getCallbackRedirectUri } from "@/logic/constants";
 import { createVerifyJwtCallback, getEncryptJweCallback } from "@/logic/jwt";
 import {
@@ -66,6 +66,12 @@ export interface AuthorizeStepOptions {
   credentials: CredentialWithKey[];
 
   /**
+   * Optional authorization driver for automated browser flows.
+   * When present, handlePidFlow uses it instead of opening the system browser.
+   */
+  driver?: AuthorizationDriver;
+
+  /**
    * Request URI obtained from the Pushed Authorization Request step
    */
   requestUri?: string;
@@ -75,16 +81,19 @@ export interface AuthorizeStepOptions {
    */
   rpMetadata: ItWalletCredentialVerifierMetadata;
 
+  /** Runner run identifier handed to the driver (empty for the human CLI). */
+  runId?: string;
+
+  /**
+   * Run cancellation/deadline signal. Aborting closes the callback listener
+   * and signals the driver.
+   */
+  signal?: AbortSignal;
+
   /**
    * Wallet Attestation used to authenticate the client, it will be loaded from the configuration
    */
   walletAttestation: Omit<AttestationResponse, "created">;
-
-  /**
-   * Optional authorization driver for automated browser flows.
-   * When present, handlePidFlow uses it instead of opening the system browser.
-   */
-  driver?: AuthorizationDriver;
 }
 
 export type AuthorizeStepResponse = StepResponse & {
@@ -107,32 +116,52 @@ export class AuthorizeDefaultStep extends StepFlow {
     callbackPort,
     driver,
     redirectUri,
+    runId,
+    signal,
   }: {
     authorizeUrl: string;
     callbackPort: number;
     driver?: AuthorizationDriver;
     redirectUri: string;
+    runId?: string;
+    signal?: AbortSignal;
   }): Promise<AuthorizeExecuteResponse> {
     this.log.debug(`Starting callback server on ${redirectUri}`);
-    const callbackPromise = startCallbackServer(callbackPort);
+    // Navigation starts only once the listener is ready.
+    const callback = await openCallbackServer({ port: callbackPort, signal });
+    const driverController = new AbortController();
+    const driverSignal = signal
+      ? AbortSignal.any([signal, driverController.signal])
+      : driverController.signal;
 
-    if (driver) {
-      this.log.info(`Driving authorization via driver: ${authorizeUrl}`);
-      await driver.driveAuthorization({
-        authorizationUrl: authorizeUrl,
-        redirectUri,
-        runId: "",
-        signal: new AbortController().signal,
-      });
-    } else {
-      this.log.info(`Opening browser at: ${authorizeUrl}`);
-      openBrowser(authorizeUrl);
+    let authorizeResponse: AuthorizationResponse;
+    try {
+      if (driver) {
+        this.log.info(`Driving authorization via driver: ${authorizeUrl}`);
+        const driving = driver.driveAuthorization({
+          authorizationUrl: authorizeUrl,
+          redirectUri,
+          runId: runId ?? "",
+          signal: driverSignal,
+        });
+        // A driver failure ends the wait; a driver that returns early still
+        // waits for the callback.
+        authorizeResponse = await Promise.race([
+          callback.completion,
+          driving.then(() => callback.completion),
+        ]);
+      } else {
+        this.log.info(`Opening browser at: ${authorizeUrl}`);
+        openBrowser(authorizeUrl);
+        this.log.info(
+          "Waiting for the authorization callback... Complete the authentication flow in your browser.",
+        );
+        authorizeResponse = await callback.completion;
+      }
+    } finally {
+      driverController.abort(new Error("authorization step finished"));
+      await callback.close();
     }
-
-    this.log.info(
-      "Waiting for the authorization callback... Complete the authentication flow in your browser.",
-    );
-    const authorizeResponse = await callbackPromise;
 
     this.log.debug(
       "Authorization callback received:",
@@ -320,6 +349,8 @@ export class AuthorizeDefaultStep extends StepFlow {
           callbackPort,
           driver: options.driver,
           redirectUri,
+          runId: options.runId,
+          signal: options.signal,
         });
       }
 

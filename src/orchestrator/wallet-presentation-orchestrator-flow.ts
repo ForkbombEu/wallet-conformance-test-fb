@@ -2,10 +2,11 @@ import { PresentationTestConfiguration } from "#/config";
 import { extractClientIdPrefix } from "@pagopa/io-wallet-oid4vp";
 import { ItWalletCredentialVerifierMetadata } from "@pagopa/io-wallet-oid-federation";
 
+import type { EngagementFactoryConfig } from "@/logic/engagement-factory";
+
 import { loadAttestation, loadCredentialsForPresentation } from "@/functions";
 import { createLogger, loadConfigWithHierarchy } from "@/logic";
 import { getAuthorizeRequestUrl } from "@/logic/authorization-request-url";
-import type { EngagementFactoryConfig } from "@/logic/engagement-factory";
 import {
   FetchMetadataVpDefaultStep,
   FetchMetadataVpStepResponse,

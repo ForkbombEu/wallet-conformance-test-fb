@@ -8,8 +8,9 @@ import { resolveCredentialOffer } from "@pagopa/io-wallet-oid4vci";
 import { IoWalletSdkConfig } from "@pagopa/io-wallet-utils";
 import { randomUUID } from "node:crypto";
 
-import { loadAttestation, loadCredentialsForPresentation } from "@/functions";
 import type { AuthorizationDriver } from "@/logic/authorization-driver";
+
+import { loadAttestation, loadCredentialsForPresentation } from "@/functions";
 import {
   createLogger,
   loadConfigWithHierarchy,
@@ -19,6 +20,11 @@ import {
   signJwtCallback,
 } from "@/logic";
 import { getCallbackRedirectUri } from "@/logic/constants";
+import {
+  createRunnerAuthorizationDriver,
+  getRunnerRuntime,
+  type RunnerRuntime,
+} from "@/logic/runner-runtime";
 import {
   CredentialConfigurationError,
   DeferredIssuancePreconditionError,
@@ -75,9 +81,9 @@ export class WalletIssuanceOrchestratorFlow {
 
   private authorizeStep: AuthorizeDefaultStep;
   private config: Config;
-  private driver?: AuthorizationDriver;
   private credentialRequestStep: CredentialRequestDefaultStep;
   private deferredCredentialRequestStep: DeferredCredentialRequestDefaultStep;
+  private readonly driver?: AuthorizationDriver;
   private fetchMetadataStep: FetchMetadataDefaultStep;
   private readonly ISSUANCE_WITH_DELETED_TOTAL_STEPS = 7;
   private issuanceConfig: IssuerTestConfiguration;
@@ -86,16 +92,28 @@ export class WalletIssuanceOrchestratorFlow {
 
   private notificationRequestStep: NotificationRequestDefaultStep;
   private pushedAuthorizationRequestStep: PushedAuthorizationRequestDefaultStep;
+  private readonly runnerRuntime?: RunnerRuntime;
   private sdkConfig: IoWalletSdkConfig;
   private tokenRequestStep: TokenRequestDefaultStep;
   private readonly TOTAL_STEPS = 6;
 
+  /**
+   * @param driver Explicit authorization driver. When omitted, a child
+   *   launched by the runner resolves the profile's operator driver (or a
+   *   driver that refuses to open the system browser); the human CLI keeps
+   *   the system-browser path.
+   */
   constructor(
     issuanceConfig: IssuerTestConfiguration,
     driver?: AuthorizationDriver,
   ) {
     this.issuanceConfig = issuanceConfig;
-    this.driver = driver;
+    this.runnerRuntime = getRunnerRuntime();
+    this.driver =
+      driver ??
+      (this.runnerRuntime
+        ? createRunnerAuthorizationDriver(this.runnerRuntime)
+        : undefined);
     this.log = this.log.withTag(this.issuanceConfig.name);
 
     this.config = loadConfigWithHierarchy();
@@ -465,6 +483,8 @@ export class WalletIssuanceOrchestratorFlow {
       driver: this.driver,
       requestUri: pushedAuthorizationRequestResponse.response?.request_uri,
       rpMetadata: entityStatementClaims?.metadata?.openid_credential_verifier,
+      runId: this.runnerRuntime?.runId,
+      signal: this.runnerRuntime?.signal,
       walletAttestation: walletAttestationResponse,
     });
     this._authorizeResponse = authorizeResponse;

@@ -10,7 +10,7 @@ Per-task handoffs live in `/home/bario/pagopa-followup-20261027/handoffs/`.
 |------|--------|-------|
 | L08 profile/INI startup | DONE (audited + completed) | catalogue drives HTTP + executor; port-0 URL fixed |
 | L09 child config/discovery | DONE for source mode | real Vitest child proven; built mode = L14 |
-| L10 native browser path | NOT DONE | |
+| L10 native browser path | DONE | runner child resolves operator driver; callback readiness/cancel; presentation rejected (MVP) |
 | L11 lifecycle truth | PARTIAL (wip checkpoint `99b3ad0`) | |
 | L12 recovery/ownership | NOT RUN | |
 | L13 persistent evidence | NOT RUN | wire schema still rejects adapter `raw` |

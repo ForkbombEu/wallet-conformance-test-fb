@@ -226,7 +226,7 @@ describe("assertBrowserDriverAvailable", () => {
 
   it("rejects browser_redirect when no driver is configured", () => {
     const profile = requireProfile("credimi-issuance-smoke");
-    expect(profile?.browserDriver).toBeUndefined();
+    expect(profile.authorizationDriver).toBeUndefined();
     expect(() =>
       assertBrowserDriverAvailable(profile, "browser_redirect"),
     ).toThrow(ProfileError);

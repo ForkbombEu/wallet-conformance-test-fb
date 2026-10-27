@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function */
 import type { ItWalletSpecsVersion } from "@pagopa/io-wallet-utils";
 
 import { describe, expect, it } from "vitest";
@@ -39,7 +40,7 @@ function makeBaseConfig(): Config {
       authorize_request_url: "https://rp.example/auth",
       tests_dir: "./tests/presentation",
     },
-    profile: { ecosystem: "it_wallet" },
+    profile: { ecosystem: "generic_oid4vci" },
     steps_mapping: { mapping: {} },
     testing: {
       custom_step_pattern: "**/*.ts",
@@ -202,6 +203,31 @@ describe("buildEffectiveConfig", () => {
         WS,
       ),
     ).not.toThrow();
+  });
+
+  it("rejects auto that resolves to browser_redirect (it_wallet) without a driver", () => {
+    const base = makeBaseConfig();
+    base.profile.ecosystem = "it_wallet";
+    expect(() =>
+      buildEffectiveConfig(profile, "credimi-issuance-smoke", {}, base, WS),
+    ).toThrow(/no authorization driver/);
+  });
+
+  it("allows auto resolving to browser_redirect when the profile has a driver", () => {
+    const base = makeBaseConfig();
+    base.profile.ecosystem = "it_wallet";
+    const withDriver: Profile = {
+      ...profile,
+      authorizationDriver: { modulePath: "/abs/driver.mjs", type: "puppeteer" },
+    };
+    const eff = buildEffectiveConfig(
+      withDriver,
+      "credimi-issuance-smoke",
+      {},
+      base,
+      WS,
+    );
+    expect(eff.authorizationDriver?.modulePath).toBe("/abs/driver.mjs");
   });
 
   it("rejects credential_presentation for issuance profile", () => {

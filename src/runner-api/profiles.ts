@@ -21,17 +21,6 @@ const selectionEntrySchema = z.object({
 export type SelectionEntry = z.infer<typeof selectionEntrySchema>;
 
 // ---------------------------------------------------------------------------
-// Browser driver config (opaque for now; prompt 18 fills this in)
-// ---------------------------------------------------------------------------
-
-const browserDriverConfigSchema = z
-  .object({
-    type: z.string().min(1),
-  })
-  .strict();
-export type BrowserDriverConfig = z.infer<typeof browserDriverConfigSchema>;
-
-// ---------------------------------------------------------------------------
 // Profile
 // ---------------------------------------------------------------------------
 
@@ -60,7 +49,6 @@ export const profileSchema = z
       .array(authorizationInteractionSchema)
       .min(1),
     authorizationDriver: authorizationDriverConfigSchema.optional(),
-    browserDriver: browserDriverConfigSchema.optional(),
     category: z.enum(["issuance", "presentation"]),
     configFile: z.string().min(1),
     coverageMode: z.enum(["interoperability", "it_wallet_profile"]),
@@ -318,9 +306,10 @@ export function loadProfileCatalogue(profilesPath: string): ProfileCatalogue {
   }
 
   const baseDir = dirname(absPath);
-  const resolved = parsed.data.profiles.map((profile) =>
-    resolveProfilePaths(profile, baseDir),
-  );
+  const resolved = parsed.data.profiles.map((profile) => {
+    assertRunnerSupportsProfile(profile);
+    return resolveProfilePaths(profile, baseDir);
+  });
   return createProfileCatalogue(resolved);
 }
 
@@ -333,6 +322,26 @@ export function validateRunOverrides(raw: unknown): RunOverrides {
     throw new ProfileError("INVALID_OVERRIDE", `Invalid override: ${issues}`);
   }
   return result.data;
+}
+
+/**
+ * The runner MVP executes issuance only. Presentation runs (and therefore an
+ * engagementFactory) have no native runner path yet, so such profiles are
+ * rejected at startup instead of being advertised.
+ */
+function assertRunnerSupportsProfile(profile: Profile): void {
+  if (profile.category !== "issuance") {
+    throw new ProfileError(
+      "INVALID_PROFILES",
+      `Profile '${profile.id}': category '${profile.category}' is not supported by this runner`,
+    );
+  }
+  if (profile.engagementFactory) {
+    throw new ProfileError(
+      "INVALID_PROFILES",
+      `Profile '${profile.id}': engagementFactory requires presentation runs, which this runner does not support`,
+    );
+  }
 }
 
 function requireExisting(path: string, what: string, profileId: string) {

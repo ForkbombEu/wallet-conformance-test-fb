@@ -100,7 +100,12 @@ interface DrainedStream {
  */
 export function buildNativeEnv(
   effectiveConfig: EffectiveConfig,
-  paths: { effectiveIni: string; resultsDir: string; runId: string },
+  paths: {
+    deadline?: string;
+    effectiveIni: string;
+    resultsDir: string;
+    runId: string;
+  },
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
@@ -129,6 +134,13 @@ export function buildNativeEnv(
   }
   if (overrides.credential_offer_uri) {
     env.CONFIG_CREDENTIAL_OFFER_URI = overrides.credential_offer_uri;
+  }
+  if (effectiveConfig.authorizationDriver) {
+    env.WCT_AUTHORIZATION_DRIVER_MODULE =
+      effectiveConfig.authorizationDriver.modulePath;
+  }
+  if (paths.deadline) {
+    env.WCT_RUN_DEADLINE = paths.deadline;
   }
   env.WCT_DB_PATH = effectiveConfig.writablePaths.db;
   env.WCT_RESULTS_DIR = paths.resultsDir;
@@ -178,6 +190,7 @@ export function createNativeExecutor(
       writablePaths: effectiveConfig.writablePaths,
     });
     const env = buildNativeEnv(effectiveConfig, {
+      deadline: ctx.deadline,
       effectiveIni,
       resultsDir,
       runId,

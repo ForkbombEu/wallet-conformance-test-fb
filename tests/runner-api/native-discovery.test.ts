@@ -149,6 +149,8 @@ async function writeOperatorIni(target: string): Promise<void> {
   section("wallet").port = await freePort();
   section("issuer").port = await freePort();
   section("network").bind_address = "127.0.0.1";
+  // Generic interoperability: `auto` resolves to credential_presentation.
+  section("profile").ecosystem = "generic_oid4vci";
   writeFileSync(target, stringify(ini));
 }
 
@@ -295,9 +297,10 @@ describe("L09 — real native child discovers and consumes the selection", () =>
         adapter,
         signal: controller.signal,
       });
-      while (spawned.length === 0) {
+      for (let i = 0; spawned.length === 0 && i < 500; i++) {
         await new Promise((r) => setTimeout(r, 20));
       }
+      expect(spawned).toHaveLength(1);
       await new Promise((r) => setTimeout(r, 500));
       controller.abort();
       const { evidence } = await pending;

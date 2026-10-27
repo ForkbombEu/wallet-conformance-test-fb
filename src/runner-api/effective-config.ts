@@ -7,6 +7,7 @@ import {
   assertAuthorizationInteractionSupported,
   assertBrowserDriverAvailable,
   assertSelectionMatchesCategory,
+  type AuthorizationDriverConfig,
   type AuthorizationInteraction,
   type Profile,
   ProfileError,
@@ -18,6 +19,9 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface EffectiveConfig {
+  /** Operator driver (absolute module path) for browser_redirect runs. */
+  authorizationDriver?: AuthorizationDriverConfig;
+  /** Requested interaction as configured/overridden (may be `auto`). */
   authorizationInteraction: AuthorizationInteraction;
   category: Profile["category"];
   coverageMode: Profile["coverageMode"];
@@ -64,7 +68,15 @@ export function buildEffectiveConfig(
     baseConfig.issuance.authorization_interaction;
 
   assertAuthorizationInteractionSupported(profile, effectiveInteraction);
-  assertBrowserDriverAvailable(profile, effectiveInteraction);
+  // `auto` is resolved by the native AuthorizeDefaultStep from the ecosystem;
+  // validate the interaction that will actually run.
+  assertBrowserDriverAvailable(
+    profile,
+    resolveAuthorizationInteraction(
+      effectiveInteraction,
+      baseConfig.profile.ecosystem,
+    ),
+  );
 
   // Resolve effective issuer identifier
   const issuerIdentifier = overrides.issuer_url ?? baseConfig.issuance.url;
@@ -92,6 +104,7 @@ export function buildEffectiveConfig(
     baseConfig.issuance.credential_types;
 
   return {
+    authorizationDriver: profile.authorizationDriver,
     authorizationInteraction: effectiveInteraction,
     category: profile.category,
     coverageMode: profile.coverageMode,
@@ -133,4 +146,18 @@ export function loadOperatorConfig(configFile: string): Config {
       process.env.NODE_TLS_REJECT_UNAUTHORIZED = tlsBefore;
     }
   }
+}
+
+/**
+ * Mirrors AuthorizeDefaultStep: `auto` means browser_redirect for the Italian
+ * ecosystem and credential_presentation otherwise.
+ */
+export function resolveAuthorizationInteraction(
+  interaction: AuthorizationInteraction,
+  ecosystem: Config["profile"]["ecosystem"],
+): Exclude<AuthorizationInteraction, "auto"> {
+  if (interaction !== "auto") return interaction;
+  return ecosystem === "it_wallet"
+    ? "browser_redirect"
+    : "credential_presentation";
 }

@@ -23,6 +23,23 @@ export interface AuthorizationDriverContext {
   signal: AbortSignal;
 }
 
+/** Minimal browser surface used by the puppeteer driver. */
+export interface DriverBrowser {
+  close(): Promise<void>;
+  newPage(): Promise<DriverPage>;
+}
+
+// ---------------------------------------------------------------------------
+// Puppeteer driver (operator-configured)
+// ---------------------------------------------------------------------------
+
+export interface DriverPage {
+  close(): Promise<void>;
+  goto(url: string, opts?: object): Promise<unknown>;
+}
+
+export type LaunchDriverBrowser = () => Promise<DriverBrowser>;
+
 export interface OperatorModule {
   driveAuthorization(params: {
     authorizationUrl: string;
@@ -33,7 +50,7 @@ export interface OperatorModule {
 }
 
 // ---------------------------------------------------------------------------
-// Puppeteer driver (operator-configured)
+// Factory from profile config
 // ---------------------------------------------------------------------------
 
 export interface PuppeteerDriverConfig {
@@ -61,38 +78,43 @@ export function createCliDriver(): AuthorizationDriver {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Factory from profile config
-// ---------------------------------------------------------------------------
+const launchHeadlessPuppeteer: LaunchDriverBrowser = async () => {
+  const puppeteer = await import("puppeteer");
+  return puppeteer.default.launch({ headless: true });
+};
 
+/**
+ * Operator-configured puppeteer driver. The browser is closed when the
+ * operator module finishes or fails, and immediately when the run signal
+ * aborts, so a hung operator module cannot keep the browser alive.
+ *
+ * @param launchBrowser low-level browser launch boundary (defaults to
+ *   headless puppeteer).
+ */
 export function createPuppeteerDriver(
   config: PuppeteerDriverConfig,
+  launchBrowser: LaunchDriverBrowser = launchHeadlessPuppeteer,
 ): AuthorizationDriver {
   return {
     async driveAuthorization(ctx) {
-      const puppeteer = await import("puppeteer");
+      ctx.signal.throwIfAborted();
       const operatorModule = (await import(
         pathToFileURL(config.modulePath).href
       )) as OperatorModule;
 
-      let browser: unknown;
-      let page: unknown;
-      try {
-        browser = await puppeteer.default.launch({
-          headless: true,
-        });
-        page = await (
-          browser as {
-            newPage(): Promise<unknown>;
-          }
-        ).newPage();
+      const browser = await launchBrowser();
+      let closing: Promise<void> | undefined;
+      const closeBrowser = () => {
+        closing ??= browser.close().catch(() => undefined);
+        return closing;
+      };
+      const onAbort = () => void closeBrowser();
+      ctx.signal.addEventListener("abort", onAbort, { once: true });
 
-        // Navigate to authorization URL
-        await (
-          page as {
-            goto(url: string, opts?: object): Promise<unknown>;
-          }
-        ).goto(ctx.authorizationUrl, { waitUntil: "networkidle2" });
+      try {
+        ctx.signal.throwIfAborted();
+        const page = await browser.newPage();
+        await page.goto(ctx.authorizationUrl, { waitUntil: "networkidle2" });
 
         // Let the operator module perform target-specific navigation/login
         await operatorModule.driveAuthorization({
@@ -102,29 +124,8 @@ export function createPuppeteerDriver(
           signal: ctx.signal,
         });
       } finally {
-        // Always close page and browser
-        try {
-          if (
-            page &&
-            typeof (page as { close?: () => Promise<void> }).close ===
-              "function"
-          ) {
-            await (page as { close: () => Promise<void> }).close();
-          }
-        } catch {
-          // ignore close errors
-        }
-        try {
-          if (
-            browser &&
-            typeof (browser as { close?: () => Promise<void> }).close ===
-              "function"
-          ) {
-            await (browser as { close: () => Promise<void> }).close();
-          }
-        } catch {
-          // ignore close errors
-        }
+        ctx.signal.removeEventListener("abort", onAbort);
+        await closeBrowser();
       }
     },
   };

@@ -22,6 +22,8 @@ export interface AckMessage {
 
 export interface ExecuteContext {
   abortSignal: AbortSignal;
+  /** ISO time at which the manager aborts the run (timeout_ms). */
+  deadline?: string;
   request: RunRequest;
   runId: string;
   runRoot: string;
@@ -246,6 +248,7 @@ export class JobManager {
       const runRoot = this.store.workDir(run.runId);
       const evidence = await this.execute({
         abortSignal: abortController.signal,
+        deadline: new Date(Date.now() + timeoutMs).toISOString(),
         request: run.request,
         runId: run.runId,
         runRoot,

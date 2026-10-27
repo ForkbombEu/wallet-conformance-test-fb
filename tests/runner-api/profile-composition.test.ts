@@ -21,6 +21,7 @@ function makeIni(overrides: Record<string, string> = {}): string {
     "logging.log_format": "%(message)s",
     "logging.log_level": "INFO",
     "presentation.authorize_request_url": "https://rp.example/auth",
+    "profile.ecosystem": "generic_oid4vci",
     "trust.ca_cert_path": "./data/trust",
     "trust.certificate_subject": "CN=test",
     "trust.federation_trust_anchors[]": "https://ta.example",

@@ -370,6 +370,9 @@ describe("POST /v1/runs/cancel-by-key", () => {
   });
 
   it("cancels existing run by key without creating work", async () => {
+    // A slower executor keeps the run live until the cancel arrives.
+    await closeServer();
+    await startTestServer(makeFakeExecute(1_000));
     // Start a run
     await fetch(`${baseUrl}/v1/runs`, {
       body: JSON.stringify(makeRequest()),

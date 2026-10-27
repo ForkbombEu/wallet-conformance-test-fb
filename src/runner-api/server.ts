@@ -67,7 +67,7 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
   // -- GET /v1/capabilities ---------------------------------------------------
   app.get("/v1/capabilities", (_req: Request, res: Response) => {
     res.status(200).json({
-      categories: ["issuance", "presentation"],
+      categories: [...new Set(deps.catalogue.profiles.map((p) => p.category))],
       contract_version: CONTRACT_VERSION,
       engine: {
         fork_repository:

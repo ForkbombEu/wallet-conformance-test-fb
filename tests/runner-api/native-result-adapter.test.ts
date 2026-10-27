@@ -64,7 +64,7 @@ describe("validateAndAdaptNativeExport", () => {
     expect(result.assertions).toHaveLength(1);
     const a = result.assertions[0];
     expect(a?.native_status).toBe("FAIL");
-    expect(a?.full_title).toBe("CI_002: test description");
+    expect(a?.full_title).toBe("Suite > CI_002: test description");
     expect(a?.ancestor_titles).toEqual(["Suite"]);
     expect(a?.requirement_id).toBe("CI_002");
     expect(a?.file).toBe("test.ts");

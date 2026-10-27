@@ -22,7 +22,7 @@ import {
   resolveVitestBin,
   resolveVitestConfigPath,
 } from "@/logic/test-command";
-import { runRequestSchema } from "@/runner-api/contract";
+import { runnerResultSchema, runRequestSchema } from "@/runner-api/contract";
 import { resolveRun } from "@/runner-api/main";
 import {
   buildNativeEnv,
@@ -195,9 +195,7 @@ describe("L09 — real native child discovers and consumes the selection", () =>
         }),
       );
 
-      // Full wire-schema validation of the published result is L13's gate
-      // (the strict assertion schema does not yet admit the adapter's `raw`).
-      const result = evidence.result;
+      const result = runnerResultSchema.parse(evidence.result);
       expect(result.execution.status).toBe("completed");
       expect(result.execution.exit_code).toBe(0);
       expect(result.summary.assertion_count).toBe(2);

@@ -223,42 +223,32 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
   // -- GET /v1/runs/:runId/artifacts/:artifactId ---------------------------------------
   app.get(
     "/v1/runs/:runId/artifacts/:artifactId",
-    (req: Request, res: Response) => {
-      const { artifactId, runId } = req.params as {
-        artifactId: string;
-        runId: string;
-      };
-      if (!isSafeArtifactId(artifactId)) {
-        res.status(400).json({
-          error: { code: "INVALID_REQUEST", message: "Invalid artifact ID" },
-        });
-        return;
+    (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { artifactId, runId } = req.params as {
+          artifactId: string;
+          runId: string;
+        };
+        if (!isSafeArtifactId(artifactId)) {
+          throw invalidRequest("Invalid artifact ID");
+        }
+        // Bound to BOTH the run and the artifact via the run's manifest.
+        const artifact = deps.artifacts.read(runId, artifactId);
+        if (!artifact) {
+          throw new RunnerError(
+            "NOT_FOUND",
+            404,
+            `Artifact '${artifactId}' not found in run '${runId}'`,
+          );
+        }
+        res
+          .status(200)
+          .setHeader("Content-Type", artifact.entry.mime_type)
+          .setHeader("X-Content-SHA256", artifact.entry.sha256)
+          .send(artifact.content);
+      } catch (error) {
+        next(error);
       }
-      // Bind run_id and artifact_id — artifact must belong to this run
-      if (!artifactId.startsWith(`${runId}:`)) {
-        res.status(404).json({
-          error: {
-            code: "NOT_FOUND",
-            message: `Artifact '${artifactId}' not found in run '${runId}'`,
-          },
-        });
-        return;
-      }
-      const record = deps.artifacts.get(artifactId);
-      if (!record) {
-        res.status(404).json({
-          error: {
-            code: "NOT_FOUND",
-            message: `Artifact '${artifactId}' not found`,
-          },
-        });
-        return;
-      }
-      res
-        .status(200)
-        .setHeader("Content-Type", record.contentType)
-        .setHeader("X-Content-SHA256", record.sha256)
-        .send(record.content);
     },
   );
 

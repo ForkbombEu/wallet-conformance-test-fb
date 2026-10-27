@@ -335,8 +335,7 @@ describe("L12 — restart recovery", () => {
     m.recoverInterruptedRuns();
     const snap = await m.getSnapshot("was-running");
     expect(snap.status).toBe("error");
-    // Wire-schema parse of adapter-produced assertions (`raw`) is L13's gate.
-    const result = await m.getResult("was-running");
+    const result = runnerResultSchema.parse(await m.getResult("was-running"));
     expect(result.execution.status).toBe(snap.status);
     expect(result.limitations.join(" ")).toMatch(/interrupted/);
     expect(result.native.assertions).toHaveLength(1);

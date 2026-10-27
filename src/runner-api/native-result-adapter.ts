@@ -101,7 +101,7 @@ export function validateAndAdaptNativeExport(
     assertion_id: `assertion-${index}`,
     error_message: a.errorMessage ?? undefined,
     file: a.file,
-    full_title: a.title,
+    full_title: [...a.ancestorTitles, a.title].join(" > "),
     native_status: a.nativeStatus,
     phase: a.phase,
     raw: JSON.stringify(a),

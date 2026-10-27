@@ -129,16 +129,31 @@ const nativeSessionSchema = z.object({
   status: z.string(),
 });
 
+/**
+ * Shared runner v1.0 native assertion wire shape (both engines). `raw` is the
+ * engine's original producer record as JSON text, kept for diagnostics.
+ */
 const nativeAssertionSchema = z
   .object({
     ancestor_titles: z.array(z.string()),
-    assertion_id: z.string(),
-    credential_config_context: z.string().optional(),
+    assertion_id: z.string().min(1),
+    credential_configuration_id: z.string().optional(),
     error_message: z.string().optional(),
     file: z.string(),
     full_title: z.string(),
     native_status: z.enum(["FAIL", "NOT_REACHED", "PASS"]),
     phase: z.string(),
+    raw: z
+      .string()
+      .refine((text) => {
+        try {
+          JSON.parse(text);
+          return true;
+        } catch {
+          return false;
+        }
+      }, "must be JSON text")
+      .optional(),
     requirement_id: z.string().optional(),
     vitest_status: z.string().optional(),
   })

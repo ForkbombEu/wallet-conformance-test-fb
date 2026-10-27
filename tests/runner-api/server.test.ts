@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -89,7 +89,7 @@ async function startTestServer(
   executeFn: ExecuteFn = makeFakeExecute(),
 ): Promise<void> {
   store = new JobStore(dir);
-  artifacts = new ArtifactStore();
+  artifacts = new ArtifactStore(dir);
   jobManager = new JobManager({ execute: executeFn, store });
   const app = createRunnerApp({
     artifacts,
@@ -452,9 +452,11 @@ describe("GET /v1/runs/:runId/artifacts/:artifactId", () => {
 
   it("serves exact bytes and hash", async () => {
     const content = Buffer.from("artifact content");
-    artifacts.register("run-1:art1", "test.json", "application/json", content);
+    const sourcePath = join(dir, "test.json");
+    writeFileSync(sourcePath, content);
+    artifacts.publish("run-1", [sourcePath]);
 
-    const res = await fetch(`${baseUrl}/v1/runs/run-1/artifacts/run-1%3Aart1`, {
+    const res = await fetch(`${baseUrl}/v1/runs/run-1/artifacts/test.json`, {
       headers: authHeaders(),
     });
     expect(res.status).toBe(200);

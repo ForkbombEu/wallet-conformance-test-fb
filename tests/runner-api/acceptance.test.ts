@@ -195,7 +195,7 @@ let closeServer: () => Promise<void>;
 
 async function startTestServer(executeFn: ExecuteFn): Promise<void> {
   store = new JobStore(dir);
-  artifacts = new ArtifactStore();
+  artifacts = new ArtifactStore(dir);
   jobManager = new JobManager({ execute: executeFn, store });
   const app = createRunnerApp({
     artifacts,
@@ -273,17 +273,14 @@ describe("Acceptance — full API/job/config/export integration", () => {
     expect(result.native.sessions[0]?.id).toBe("acceptance-session");
     expect(result.summary.result).toBe("pass");
 
-    // 4. Register and download artifact
-    artifacts.register(
-      `${runId}:native-export`,
-      "native-results.json",
-      "application/json",
-      Buffer.from(JSON.stringify(result)),
-    );
-    const artRes = await fetch(
-      `${baseUrl}/v1/runs/${runId}/artifacts/${encodeURIComponent(`${runId}:native-export`)}`,
-      { headers: authHeaders() },
-    );
+    // 4. Publish through the artifact layer and download by run + ID
+    const exportPath = join(dir, "native-results.json");
+    writeFileSync(exportPath, JSON.stringify(result));
+    const [entry] = artifacts.publish(runId, [exportPath]).entries;
+    if (!entry) throw new Error("artifact not published");
+    const artRes = await fetch(`${baseUrl}${entry.download_url}`, {
+      headers: authHeaders(),
+    });
     expect(artRes.status).toBe(200);
     const artBody = await artRes.json();
     expect(artBody.summary).toBeDefined();

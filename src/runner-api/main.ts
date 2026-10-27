@@ -2,7 +2,7 @@ import type { Express } from "express";
 
 import { createServer, type Server } from "node:http";
 
-import type { RunRequest } from "./contract";
+import type { RunnerResult, RunRequest } from "./contract";
 
 import { ArtifactStore } from "./artifacts";
 import {
@@ -10,7 +10,11 @@ import {
   type EffectiveConfig,
   loadOperatorConfig,
 } from "./effective-config";
-import { type ExecuteFn, JobManager } from "./job-manager";
+import {
+  type ExecuteFn,
+  type ExecutionEvidence,
+  JobManager,
+} from "./job-manager";
 import { JobStore } from "./job-store";
 import { createNativeExecutor } from "./native-worker";
 import {
@@ -45,6 +49,29 @@ export interface RunnerMainOptions {
  */
 export function loadProfiles(profilesPath: string): Profile[] {
   return [...loadProfileCatalogue(profilesPath).profiles];
+}
+
+/**
+ * Publishes a run's declared private files through the artifact layer and
+ * returns the evidence with the manifest entries computed from the exact
+ * bytes. A declared artifact that cannot be published becomes a limitation
+ * and the summary can no longer be `pass`.
+ */
+export function publishRunEvidence(
+  artifacts: ArtifactStore,
+  runId: string,
+  evidence: ExecutionEvidence,
+): ExecutionEvidence {
+  const published = artifacts.publish(runId, evidence.privateArtifactPaths);
+  const result: RunnerResult = {
+    ...evidence.result,
+    artifacts: published.entries,
+    limitations: [...evidence.result.limitations, ...published.limitations],
+  };
+  if (published.limitations.length > 0 && result.summary.result === "pass") {
+    result.summary = { ...result.summary, result: "inconclusive" };
+  }
+  return { privateArtifactPaths: evidence.privateArtifactPaths, result };
 }
 
 /**
@@ -114,7 +141,7 @@ async function startOwnedRunner(
   host: string,
   port: number,
 ): Promise<RunnerMain> {
-  const artifacts = new ArtifactStore();
+  const artifacts = new ArtifactStore(store.rootDir);
 
   // Real executor: resolve the requested profile and dispatch to the native worker
   const execute: ExecuteFn = async (ctx) => {
@@ -125,21 +152,7 @@ async function startOwnedRunner(
       request: ctx.request,
     });
 
-    const evidence = await nativeExecutor(ctx);
-
-    // Register real artifacts from private paths
-    for (const artifactPath of evidence.privateArtifactPaths) {
-      const basename = artifactPath.split("/").pop() ?? "artifact";
-      const artifactId = `${ctx.runId}:${basename}`;
-      artifacts.registerFile(
-        artifactId,
-        basename,
-        "application/json",
-        artifactPath,
-      );
-    }
-
-    return evidence;
+    return publishRunEvidence(artifacts, ctx.runId, await nativeExecutor(ctx));
   };
 
   const jobManager = new JobManager({ execute, store });

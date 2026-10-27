@@ -251,10 +251,10 @@ export function createNativeExecutor(
       adapted = null;
     }
 
-    // Missing/corrupt/mismatched export → error
+    // Missing/corrupt/mismatched export → error (raw bytes still published)
     if (!adapted) {
       return {
-        privateArtifactPaths: [],
+        privateArtifactPaths: existsSync(exportPath) ? [exportPath] : [],
         result: buildErrorResult(
           runId,
           request,
@@ -286,23 +286,12 @@ export function createNativeExecutor(
 
     const summary = summarizeResult(execution, native);
 
-    // Register native export as an artifact
-    const artifactId = `${runId}:native-export`;
-    const nativeExportPath = join(resultsDir, "native-results.json");
-
+    // The artifact layer (publishRunEvidence) builds the manifest entries
+    // from the exact bytes; the worker only declares private files.
     return {
-      privateArtifactPaths: [nativeExportPath],
+      privateArtifactPaths: [exportPath],
       result: {
-        artifacts: [
-          {
-            artifact_id: artifactId,
-            download_url: `/v1/runs/${runId}/artifacts/${encodeURIComponent(artifactId)}`,
-            filename: "native-results.json",
-            mime_type: "application/json",
-            sha256: "", // computed by ArtifactStore at registration
-            size_bytes: 0, // computed by ArtifactStore at registration
-          },
-        ],
+        artifacts: [],
         category,
         contract_version: "1.0",
         engine: {

@@ -17,6 +17,7 @@ import {
   resultNotReady,
   runBusy,
   RunnerError,
+  runnerResultSchema,
 } from "./contract";
 import {
   type CorruptRecord,
@@ -356,6 +357,22 @@ export class JobManager {
         finishedAt,
         reason,
         outcome.partialNative,
+      );
+    }
+
+    // Publication boundary: only a wire-valid result is ever stored.
+    const wire = runnerResultSchema.safeParse(result);
+    if (!wire.success) {
+      const issues = wire.error.issues
+        .map((i) => `${i.path.join(".")}: ${i.code}`)
+        .join("; ");
+      status = "error";
+      result = buildErrorResult(
+        run,
+        new Error(`Native result failed wire validation (${issues})`),
+        status,
+        finishedAt,
+        undefined,
       );
     }
 

@@ -8,7 +8,8 @@ import {
 /**
  * Runtime facts the runner passes to its native child through the
  * environment. Only present when the child was launched by the runner
- * (`WCT_RUN_ID` set); the ordinary human CLI never sees them.
+ * (`WCT_RUNNER_MODE=1` and `WCT_RUN_ID`); the ordinary human CLI never sees
+ * them.
  */
 export interface RunnerRuntime {
   /** Operator driver from the validated profile, if any. */
@@ -47,8 +48,10 @@ export function createRunnerAuthorizationDriver(
 export function getRunnerRuntime(
   env: NodeJS.ProcessEnv = process.env,
 ): RunnerRuntime | undefined {
+  // WCT_RUN_ID alone only enables the reporter's native export (also used
+  // by humans); runner mode is set explicitly by the runner's worker.
   const runId = env.WCT_RUN_ID;
-  if (!runId) {
+  if (env.WCT_RUNNER_MODE !== "1" || !runId) {
     return undefined;
   }
   if (cached?.runId === runId) {

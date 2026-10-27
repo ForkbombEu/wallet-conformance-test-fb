@@ -64,6 +64,7 @@ export const defaultProcessAdapter: ProcessAdapter = {
 /** Bytes of each child stream retained on disk; the rest is drained. */
 export const NATIVE_LOG_CAP_BYTES = 4 * 1024 * 1024;
 const KILL_ESCALATION_MS = 2_000;
+const DRAIN_GRACE_MS = 5_000;
 const ERROR_TAIL_BYTES = 4_096;
 
 /**
@@ -71,6 +72,9 @@ const ERROR_TAIL_BYTES = 4_096;
  * from the runner's own environment must never leak into a run.
  */
 const NATIVE_ENV_PREFIXES = ["CONFIG_", "WCT_"];
+
+/** Runner secrets the native child (and operator driver code) never sees. */
+const RUNNER_SECRET_KEYS = new Set(["CREDIMI_RUNNER_TOKEN"]);
 
 // ---------------------------------------------------------------------------
 // Native executor
@@ -104,7 +108,7 @@ export function buildNativeEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(baseEnv)) {
-    if (key === "TESTS") continue;
+    if (RUNNER_SECRET_KEYS.has(key) || key === "TESTS") continue;
     if (NATIVE_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
     env[key] = value;
   }
@@ -136,6 +140,7 @@ export function buildNativeEnv(
   if (paths.deadline) {
     env.WCT_RUN_DEADLINE = paths.deadline;
   }
+  env.WCT_RUNNER_MODE = "1";
   env.WCT_DB_PATH = effectiveConfig.writablePaths.db;
   env.WCT_RESULTS_DIR = paths.resultsDir;
   env.WCT_RUN_ID = paths.runId;
@@ -213,7 +218,16 @@ export function createNativeExecutor(
     const stderrLog = drainToFile(child.stderr, join(logsDir, "stderr.log"));
 
     const exitCode = await waitForChild(child, ctx.abortSignal);
-    await Promise.all([stdoutLog.done, stderrLog.done]);
+    // A descendant outside the process group could keep the pipes open;
+    // never wait for them indefinitely once the child itself has exited.
+    await settleWithin(
+      Promise.all([stdoutLog.done, stderrLog.done]),
+      DRAIN_GRACE_MS,
+      () => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      },
+    );
     const stderrTail = stderrLog.tail() || stdoutLog.tail();
 
     const finishedAt = new Date().toISOString();
@@ -407,6 +421,21 @@ function killGroup(pid: number, signal: NodeJS.Signals): void {
   } catch {
     // group already gone
   }
+}
+
+/** Awaits `work`, but gives up after `ms`, calling `onTimeout`. */
+async function settleWithin(
+  work: Promise<unknown>,
+  ms: number,
+  onTimeout: () => void,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<"expired">((resolve) => {
+    timer = setTimeout(() => resolve("expired"), ms);
+  });
+  const outcome = await Promise.race([work.then(() => "done"), expired]);
+  clearTimeout(timer);
+  if (outcome === "expired") onTimeout();
 }
 
 function truncate(s: string, max: number): string {

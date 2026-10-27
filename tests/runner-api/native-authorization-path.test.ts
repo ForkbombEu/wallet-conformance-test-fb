@@ -125,6 +125,7 @@ function enterRunnerMode(options: {
   driverModule?: string;
 }): void {
   process.env.WCT_RUN_ID = `run-${randomUUID()}`;
+  process.env.WCT_RUNNER_MODE = "1";
   if (options.driverModule) {
     process.env.WCT_AUTHORIZATION_DRIVER_MODULE = options.driverModule;
   } else {

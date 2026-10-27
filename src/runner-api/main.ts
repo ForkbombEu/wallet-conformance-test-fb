@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import type { Config } from "@/types";
+
 import type { RunnerResult, RunRequest } from "./contract";
 
 import { ArtifactStore } from "./artifacts";
@@ -53,6 +55,24 @@ export interface RunnerMainOptions {
 }
 
 /**
+ * Loads a profile's operator INI through the native loader. Failures become
+ * PROFILE_CONFIG_INVALID; the detail (which may contain operator paths) is
+ * kept in `cause` and logged, not sent to API clients.
+ */
+export function loadProfileConfig(profile: Profile): Config {
+  try {
+    return loadOperatorConfig(profile.configFile);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new ProfileError(
+      "PROFILE_CONFIG_INVALID",
+      `Profile '${profile.id}' configuration is invalid`,
+      { cause: detail },
+    );
+  }
+}
+
+/**
  * Loads the operator profiles JSON. Kept for callers that only need the
  * validated list; startup uses {@link loadProfileCatalogue} directly.
  */
@@ -97,7 +117,7 @@ export function resolveRun(
     catalogue,
     request,
   );
-  const config = loadOperatorConfig(profile.configFile);
+  const config = loadProfileConfig(profile);
   const effective = buildEffectiveConfig(
     profile,
     selectionId,
@@ -128,8 +148,18 @@ export async function startRunner(
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
 
-  // Load and validate profiles before listening
+  // Load and validate profiles and their INIs before listening
   const catalogue = loadProfileCatalogue(options.profiles);
+  for (const profile of catalogue.profiles) {
+    try {
+      loadProfileConfig(profile);
+    } catch (error) {
+      const cause = error instanceof Error ? String(error.cause ?? "") : "";
+      throw new Error(
+        `Profile '${profile.id}' config ${profile.configFile} is invalid: ${cause}`,
+      );
+    }
+  }
 
   const store = new JobStore(options.runRoot);
   if (!store.acquireRootLock()) {
@@ -196,11 +226,16 @@ async function startOwnedRunner(
     address && typeof address === "object" ? address.port : port;
   const url = `http://${host}:${boundPort}`;
 
+  // Stop accepting connections, finalize the live run, drain the listener,
+  // and only then give up the state root.
   const close = async (): Promise<void> => {
-    await jobManager.shutdown();
-    await new Promise<void>((resolve) => {
+    const closed = new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
+    await jobManager.shutdown();
+    server.closeAllConnections();
+    await closed;
+    store.releaseRootLock();
   };
 
   return { app, close, server, url };

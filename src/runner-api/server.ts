@@ -109,6 +109,11 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
           deps.validateRun(request);
         } catch (error) {
           if (error instanceof ProfileError) {
+            // A broken operator INI is a runner-side problem, not a bad request.
+            if (error.code === "PROFILE_CONFIG_INVALID") {
+              console.error(`[runner] ${error.message}:`, error.cause);
+              throw new RunnerError(error.code, 500, error.message);
+            }
             throw new RunnerError(error.code, 400, error.message);
           }
           throw error;

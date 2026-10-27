@@ -51,7 +51,12 @@ export interface ExecutionEvidence {
   result: RunnerResult;
 }
 
+/** How long cancel/shutdown wait for an aborted worker before finalizing. */
+export const DEFAULT_ABORT_GRACE_MS = 30_000;
+
 export interface JobManagerDeps {
+  /** Grace period after an abort before the run is finalized regardless. */
+  abortGraceMs?: number;
   clock?: () => Date;
   execute: ExecuteFn;
   newId?: () => string;
@@ -63,6 +68,7 @@ interface LiveRun {
   abortReason?: AbortReason;
   /** Settles after the executor returned AND the terminal state is persisted. */
   done: Promise<void>;
+  run: StoredRun;
   runId: string;
 }
 
@@ -79,6 +85,7 @@ const ABORT_LIMITATION: Record<AbortReason, string> = {
 };
 
 export class JobManager {
+  private readonly abortGraceMs: number;
   private readonly clock: () => Date;
   private readonly execute: ExecuteFn;
   private live: LiveRun | undefined;
@@ -87,6 +94,7 @@ export class JobManager {
   private readonly store: JobStore;
 
   constructor(deps: JobManagerDeps) {
+    this.abortGraceMs = deps.abortGraceMs ?? DEFAULT_ABORT_GRACE_MS;
     this.clock = deps.clock ?? (() => new Date());
     this.execute = deps.execute;
     this.newId = deps.newId ?? generateRunId;
@@ -132,7 +140,7 @@ export class JobManager {
     const live = this.live;
     if (live?.runId === runId) {
       this.abortLive(live, "cancel");
-      await live.done;
+      await this.awaitAborted(live, run);
     } else {
       // No executor owns this run: finalize it directly.
       this.finalize(run, {
@@ -226,9 +234,10 @@ export class JobManager {
       const live = this.live;
       if (live) {
         this.abortLive(live, "shutdown");
-        await live.done;
+        await this.awaitAborted(live, live.run);
       }
-      this.store.releaseRootLock();
+      // The state-root lock belongs to the server owner (startRunner),
+      // which releases it after the listener has stopped.
     })();
     return this.shutdownPromise;
   }
@@ -284,6 +293,7 @@ export class JobManager {
     const live: LiveRun = {
       abortController,
       done: Promise.resolve(),
+      run,
       runId,
     };
     this.live = live;
@@ -316,6 +326,32 @@ export class JobManager {
   }
 
   /**
+   * Waits for an aborted worker to finish, bounded by abortGraceMs. A worker
+   * that does not stop in time gets a truthful terminal result; its late
+   * output can no longer overwrite it. The run slot is still released only
+   * when the worker actually settles.
+   */
+  private async awaitAborted(live: LiveRun, run: StoredRun): Promise<void> {
+    let timer: NodeJS.Timeout | undefined;
+    const expired = new Promise<"expired">((resolve) => {
+      timer = setTimeout(() => resolve("expired"), this.abortGraceMs);
+    });
+    const outcome = await Promise.race([
+      live.done.then(() => "done" as const),
+      expired,
+    ]);
+    clearTimeout(timer);
+    if (outcome === "expired") {
+      const message = `Native worker did not stop within ${this.abortGraceMs} ms after the abort; process cleanup is unconfirmed`;
+      this.finalize(run, {
+        detail: message,
+        error: new Error(message),
+        reason: live.abortReason,
+      });
+    }
+  }
+
+  /**
    * Persists the terminal state and a readable result in one write.
    * A run that is already terminal is never overwritten.
    */
@@ -323,6 +359,8 @@ export class JobManager {
     run: StoredRun,
     outcome:
       | {
+          /** Extra limitation kept even when an abort reason applies. */
+          detail?: string;
           error: unknown;
           partialNative?: RunnerResult["native"];
           reason?: AbortReason;
@@ -336,44 +374,51 @@ export class JobManager {
     const finishedAt = this.clock().toISOString();
     const reason = outcome.reason;
 
-    let result: RunnerResult;
-    let status: RunStatus;
+    // Publication boundary: the worker's result is wire-validated before the
+    // lifecycle is applied, and only a wire-valid result is ever stored.
+    let errorOutcome:
+      | undefined
+      | {
+          detail?: string;
+          error: unknown;
+          partialNative?: RunnerResult["native"];
+        } = "result" in outcome ? undefined : outcome;
+    let result: RunnerResult | undefined;
+    let status: RunStatus = reason ? ABORT_STATUS[reason] : "error";
+
     if ("result" in outcome) {
-      status = reason
-        ? ABORT_STATUS[reason]
-        : workerTerminalStatus(outcome.result.execution.status);
-      result = reason
-        ? withLifecycle(outcome.result, status, finishedAt, [
-            ABORT_LIMITATION[reason],
-          ])
-        : withLifecycle(outcome.result, status, finishedAt, []);
-    } else {
-      status = reason ? ABORT_STATUS[reason] : "error";
+      const wire = runnerResultSchema.safeParse(outcome.result);
+      if (wire.success) {
+        if (!reason) status = workerTerminalStatus(wire.data.execution.status);
+        result = withLifecycle(
+          wire.data,
+          status,
+          finishedAt,
+          reason ? [ABORT_LIMITATION[reason]] : [],
+        );
+      } else {
+        const issues = wire.error.issues
+          .map((i) => `${i.path.join(".")}: ${i.code}`)
+          .join("; ");
+        const message = `Native result failed wire validation (${issues})`;
+        // Keep the lifecycle status; only the invalid native data is dropped.
+        errorOutcome = { detail: message, error: new Error(message) };
+      }
+    }
+    if (errorOutcome) {
       result = buildErrorResult(
         run,
-        outcome.error,
+        errorOutcome.error,
         status,
         finishedAt,
         reason,
-        outcome.partialNative,
+        errorOutcome.partialNative,
       );
+      if (reason && errorOutcome.detail) {
+        result.limitations.push(errorOutcome.detail);
+      }
     }
-
-    // Publication boundary: only a wire-valid result is ever stored.
-    const wire = runnerResultSchema.safeParse(result);
-    if (!wire.success) {
-      const issues = wire.error.issues
-        .map((i) => `${i.path.join(".")}: ${i.code}`)
-        .join("; ");
-      status = "error";
-      result = buildErrorResult(
-        run,
-        new Error(`Native result failed wire validation (${issues})`),
-        status,
-        finishedAt,
-        undefined,
-      );
-    }
+    if (!result) return;
 
     this.store.saveRun({
       ...current,

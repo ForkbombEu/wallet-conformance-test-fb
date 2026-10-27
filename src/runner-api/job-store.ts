@@ -118,6 +118,19 @@ export class JobStore {
     this.rootDir = rootDir;
     mkdirSync(this.runsDir, { recursive: true });
     mkdirSync(this.indexDir, { recursive: true });
+    // Records quarantined by an earlier process stay blocked: their index
+    // entries still exist, and their keys must never start new work.
+    if (existsSync(this.quarantineDir)) {
+      for (const file of readdirSync(this.quarantineDir)) {
+        if (!file.endsWith(".json")) continue;
+        const runId = file.slice(0, -".json".length);
+        this.corrupt.set(runId, {
+          file,
+          reason: "quarantined by a previous runner process",
+          runId,
+        });
+      }
+    }
   }
 
   static canonicalRequestHash(request: RunRequest): string {

@@ -1,3 +1,5 @@
+import { readPackageVersion } from "@/logic/runtime-paths";
+
 import type {
   RunnerResult,
   RunRequest,
@@ -14,6 +16,10 @@ import {
   RunnerError,
 } from "./contract";
 import { generateRunId, JobStore, type StoredRun } from "./job-store";
+import { summarizeResult } from "./summarize";
+
+/** Why the manager aborted a live run. Set before aborting. */
+export type AbortReason = "cancel" | "deadline" | "shutdown";
 
 export interface AckMessage {
   driver_status: "completed" | "failed";
@@ -45,15 +51,30 @@ export interface JobManagerDeps {
 
 interface LiveRun {
   abortController: AbortController;
-  cleanupPromise: Promise<void>;
+  abortReason?: AbortReason;
+  /** Settles after the executor returned AND the terminal state is persisted. */
+  done: Promise<void>;
   runId: string;
 }
+
+const ABORT_STATUS: Record<AbortReason, RunStatus> = {
+  cancel: "cancelled",
+  deadline: "timed_out",
+  shutdown: "cancelled",
+};
+
+const ABORT_LIMITATION: Record<AbortReason, string> = {
+  cancel: "Run cancelled by request; native results are incomplete",
+  deadline: "Run deadline (timeout_ms) reached; native results are incomplete",
+  shutdown: "Run interrupted by runner shutdown; native results are incomplete",
+};
 
 export class JobManager {
   private readonly clock: () => Date;
   private readonly execute: ExecuteFn;
   private live: LiveRun | undefined;
   private readonly newId: () => string;
+  private shutdownPromise: Promise<void> | undefined;
   private readonly store: JobStore;
 
   constructor(deps: JobManagerDeps) {
@@ -64,22 +85,30 @@ export class JobManager {
     this.store.rebuildIndex();
   }
 
-  // -- submit ----------------------------------------------------------------
-
+  /**
+   * The legacy engine never publishes pending interactions, so every ACK
+   * refers to an unknown interaction.
+   */
   async acknowledge(
     runId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _interactionId: string,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    interactionId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- part of the v1 API; legacy has no interactions to settle
     _ack: AckMessage,
   ): Promise<RunSnapshot> {
-    const run = this.store.getRun(runId);
-    if (!run) {
+    if (!this.store.getRun(runId)) {
       throw notFound(runId);
     }
-    return this.toSnapshot(run);
+    throw new RunnerError(
+      "NOT_FOUND",
+      404,
+      `Interaction '${interactionId}' not found in run '${runId}'`,
+    );
   }
 
+  /**
+   * Requests cancellation and waits until the run's terminal state (with a
+   * readable result) is persisted. Idempotent.
+   */
   async cancel(runId: string): Promise<RunSnapshot> {
     const run = this.store.getRun(runId);
     if (!run) {
@@ -89,18 +118,18 @@ export class JobManager {
       return this.toSnapshot(run);
     }
 
-    this.updateRun(run.runId, (r) => ({ ...r, cancelRequested: true }));
+    this.updateRun(runId, (r) => ({ ...r, cancelRequested: true }));
 
-    // Abort the executor
-    if (this.live?.runId === runId) {
-      this.live.abortController.abort();
-      // Wait for cleanup before settling terminal cancellation
-      await this.live.cleanupPromise.catch(() => undefined);
-    }
-
-    const updated = this.store.getRun(runId);
-    if (updated && !isTerminalStatus(updated.status)) {
-      this.updateRun(runId, (r) => ({ ...r, status: "cancelled" }));
+    const live = this.live;
+    if (live?.runId === runId) {
+      this.abortLive(live, "cancel");
+      await live.done;
+    } else {
+      // No executor owns this run: finalize it directly.
+      this.finalize(run, {
+        error: new Error("Run cancelled before execution"),
+        reason: "cancel",
+      });
     }
 
     const final = this.store.getRun(runId);
@@ -109,8 +138,6 @@ export class JobManager {
     }
     return this.toSnapshot(final);
   }
-
-  // -- queries ----------------------------------------------------------------
 
   async cancelByKey(
     idempotencyKey: string,
@@ -142,8 +169,6 @@ export class JobManager {
     return run.result;
   }
 
-  // -- cancel ------------------------------------------------------------------
-
   async getSnapshot(runId: string): Promise<RunSnapshot> {
     const run = this.store.getRun(runId);
     if (!run) {
@@ -152,16 +177,21 @@ export class JobManager {
     return this.toSnapshot(run);
   }
 
-  async shutdown(): Promise<void> {
-    if (this.live) {
-      this.live.abortController.abort();
-      await this.live.cleanupPromise.catch(() => undefined);
-      this.live = undefined;
-    }
-    this.store.releaseRootLock();
+  /**
+   * Stops accepting work, aborts the live run and waits until its cleanup
+   * and terminal persistence complete. Idempotent.
+   */
+  shutdown(): Promise<void> {
+    this.shutdownPromise ??= (async () => {
+      const live = this.live;
+      if (live) {
+        this.abortLive(live, "shutdown");
+        await live.done;
+      }
+      this.store.releaseRootLock();
+    })();
+    return this.shutdownPromise;
   }
-
-  // -- acknowledge (stub for prompt 18) ---------------------------------------
 
   async submit(
     request: RunRequest,
@@ -171,7 +201,7 @@ export class JobManager {
     const keyHash = JobStore.keyHash(namespace, idempotencyKey);
     const requestHash = JobStore.canonicalRequestHash(request);
 
-    // Replay check before busy check
+    // Replay check before shutdown/busy checks: replays create no work.
     const existing = this.store.findByKeyHash(keyHash);
     if (existing) {
       if (existing.requestHash !== requestHash) {
@@ -183,7 +213,13 @@ export class JobManager {
       };
     }
 
-    // Busy check
+    if (this.shutdownPromise) {
+      throw new RunnerError(
+        "RUNNER_SHUTTING_DOWN",
+        503,
+        "Runner is shutting down",
+      );
+    }
     if (this.live) {
       throw runBusy();
     }
@@ -204,25 +240,26 @@ export class JobManager {
 
     this.store.saveRun(run);
 
-    // Start execution (fire-and-forget with proper lifecycle)
     const abortController = new AbortController();
-    let cleanupResolve: () => void;
-    const cleanupPromise = new Promise<void>((resolve) => {
-      cleanupResolve = resolve;
-    });
-
-    this.live = {
+    const live: LiveRun = {
       abortController,
-      cleanupPromise,
+      done: Promise.resolve(),
       runId,
     };
-
-    this.runExecution(run, abortController).finally(() => {
-      if (this.live?.runId === runId) {
-        this.live = undefined;
-      }
-      cleanupResolve();
-    });
+    this.live = live;
+    // The single-run slot is released only after terminal persistence.
+    live.done = this.runExecution(run, live)
+      .catch((error: unknown) => {
+        console.error(
+          `[runner] failed to finalize run ${runId}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        if (this.live === live) {
+          this.live = undefined;
+        }
+      });
 
     return {
       replayed: false,
@@ -230,81 +267,80 @@ export class JobManager {
     };
   }
 
-  // -- shutdown ----------------------------------------------------------------
-
-  private async runExecution(
-    run: StoredRun,
-    abortController: AbortController,
-  ): Promise<void> {
-    this.updateRun(run.runId, (r) => ({ ...r, status: "running" }));
-
-    // Install deadline timer from timeout_ms
-    const timeoutMs = run.request.timeout_ms ?? 600_000;
-    const deadlineTimer = setTimeout(() => {
-      abortController.abort();
-    }, timeoutMs);
-
-    try {
-      const runRoot = this.store.workDir(run.runId);
-      const evidence = await this.execute({
-        abortSignal: abortController.signal,
-        deadline: new Date(Date.now() + timeoutMs).toISOString(),
-        request: run.request,
-        runId: run.runId,
-        runRoot,
-      });
-
-      clearTimeout(deadlineTimer);
-
-      // Late completion must not overwrite terminal state
-      const current = this.store.getRun(run.runId);
-      if (current && isTerminalStatus(current.status)) {
-        return;
-      }
-
-      // Determine correct terminal status from result and context
-      let terminalStatus: RunStatus = "completed";
-      if (current?.cancelRequested) {
-        terminalStatus = "cancelled";
-      } else if (evidence.result.execution.status === "error") {
-        terminalStatus = "error";
-      }
-
-      // Persist result BEFORE setting terminal state
-      this.updateRun(run.runId, (r) => ({
-        ...r,
-        result: evidence.result,
-        status: terminalStatus,
-      }));
-    } catch (error) {
-      clearTimeout(deadlineTimer);
-
-      const current = this.store.getRun(run.runId);
-      if (current && isTerminalStatus(current.status)) {
-        return;
-      }
-
-      // Determine if this was a timeout, cancellation, or error
-      const isTimeout =
-        abortController.signal.aborted && !current?.cancelRequested;
-      const isCancel = current?.cancelRequested === true;
-      const terminalStatus: RunStatus = isCancel
-        ? "cancelled"
-        : isTimeout
-          ? "timed_out"
-          : "error";
-
-      // Persist minimal honest envelope on error/timeout/cancel
-      const errorResult = buildErrorResult(run, error, terminalStatus);
-      this.updateRun(run.runId, (r) => ({
-        ...r,
-        result: errorResult,
-        status: terminalStatus,
-      }));
+  private abortLive(live: LiveRun, reason: AbortReason): void {
+    if (live.abortReason) {
+      return;
     }
+    live.abortReason = reason;
+    live.abortController.abort(new Error(ABORT_LIMITATION[reason]));
   }
 
-  // -- helpers ------------------------------------------------------------------
+  /**
+   * Persists the terminal state and a readable result in one write.
+   * A run that is already terminal is never overwritten.
+   */
+  private finalize(
+    run: StoredRun,
+    outcome:
+      | { error: unknown; reason?: AbortReason }
+      | { reason?: AbortReason; result: RunnerResult },
+  ): void {
+    const current = this.store.getRun(run.runId);
+    if (!current || isTerminalStatus(current.status)) {
+      return;
+    }
+    const finishedAt = this.clock().toISOString();
+    const reason = outcome.reason;
+
+    let result: RunnerResult;
+    let status: RunStatus;
+    if ("result" in outcome) {
+      status = reason
+        ? ABORT_STATUS[reason]
+        : workerTerminalStatus(outcome.result.execution.status);
+      result = reason
+        ? withLifecycle(outcome.result, status, finishedAt, [
+            ABORT_LIMITATION[reason],
+          ])
+        : withLifecycle(outcome.result, status, finishedAt, []);
+    } else {
+      status = reason ? ABORT_STATUS[reason] : "error";
+      result = buildErrorResult(run, outcome.error, status, finishedAt, reason);
+    }
+
+    this.store.saveRun({
+      ...current,
+      result,
+      status,
+      updatedAt: finishedAt,
+    });
+  }
+
+  private async runExecution(run: StoredRun, live: LiveRun): Promise<void> {
+    this.updateRun(run.runId, (r) => ({ ...r, status: "running" }));
+
+    const timeoutMs = run.request.timeout_ms ?? 600_000;
+    const deadline = new Date(this.clock().getTime() + timeoutMs);
+    const deadlineTimer = setTimeout(
+      () => this.abortLive(live, "deadline"),
+      timeoutMs,
+    );
+
+    try {
+      const evidence = await this.execute({
+        abortSignal: live.abortController.signal,
+        deadline: deadline.toISOString(),
+        request: run.request,
+        runId: run.runId,
+        runRoot: this.store.workDir(run.runId),
+      });
+      clearTimeout(deadlineTimer);
+      this.finalize(run, { reason: live.abortReason, result: evidence.result });
+    } catch (error) {
+      clearTimeout(deadlineTimer);
+      this.finalize(run, { error, reason: live.abortReason });
+    }
+  }
 
   private toSnapshot(run: StoredRun): RunSnapshot {
     return {
@@ -330,12 +366,18 @@ export class JobManager {
   }
 }
 
+const ERROR_MESSAGE_MAX = 4_096;
+
 function buildErrorResult(
   run: StoredRun,
   error: unknown,
-  terminalStatus: RunStatus = "error",
+  status: RunStatus,
+  finishedAt: string,
+  reason: AbortReason | undefined,
 ): RunnerResult {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = (
+    error instanceof Error ? error.message : String(error)
+  ).slice(0, ERROR_MESSAGE_MAX);
   return {
     artifacts: [],
     category: run.request.category,
@@ -346,14 +388,19 @@ function buildErrorResult(
       id: "pagopa-wct",
       revision: "unknown",
       upstream_repository: "https://github.com/pagopa/wallet-conformance-test",
-      version: "unknown",
+      version: readPackageVersion(),
     },
     execution: {
       error: message,
+      finished_at: finishedAt,
       started_at: run.createdAt,
-      status: terminalStatus,
+      status,
     },
-    limitations: ["Infrastructure error: " + message],
+    limitations: [
+      reason ? ABORT_LIMITATION[reason] : `Execution error: ${message}`,
+      "No native result was collected",
+      "engine.revision is unknown: no trusted build revision is available",
+    ],
     native: {
       assertions: [],
       coverage_mode: "interoperability",
@@ -371,4 +418,32 @@ function buildErrorResult(
     },
     target: run.request.target,
   };
+}
+
+/**
+ * Forces the lifecycle status onto a worker result and recomputes the
+ * summary from the preserved native data (PASS + incomplete ⇒ partial).
+ */
+function withLifecycle(
+  result: RunnerResult,
+  status: RunStatus,
+  finishedAt: string,
+  limitations: string[],
+): RunnerResult {
+  const execution: RunnerResult["execution"] = {
+    ...result.execution,
+    finished_at: result.execution.finished_at ?? finishedAt,
+    status,
+  };
+  return {
+    ...result,
+    execution,
+    limitations: [...result.limitations, ...limitations],
+    summary: summarizeResult(execution, result.native),
+  };
+}
+
+/** A worker may only report completed or error without a manager abort. */
+function workerTerminalStatus(status: string): RunStatus {
+  return status === "completed" ? "completed" : "error";
 }

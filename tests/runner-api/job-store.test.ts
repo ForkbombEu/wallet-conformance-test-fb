@@ -30,7 +30,7 @@ function makeRun(overrides: Partial<StoredRun> = {}): StoredRun {
   return {
     cancelRequested: false,
     createdAt: "2026-01-01T00:00:00Z",
-    idempotencyKeyHash: "key-hash-1",
+    idempotencyKeyHash: JobStore.keyHash("default", "key-hash-1"),
     namespace: "default",
     request,
     requestHash: JobStore.canonicalRequestHash(request),
@@ -57,7 +57,7 @@ describe("JobStore — persist and retrieve", () => {
   it("saves and reads a run", () => {
     const run = makeRun();
     store.saveRun(run);
-    expect(store.getRun("run-1")).toEqual(run);
+    expect(store.getRun("run-1")).toEqual({ ...run, requestHashVersion: 2 });
   });
 
   it("returns undefined for unknown run", () => {
@@ -83,7 +83,9 @@ describe("JobStore — idempotency index", () => {
   it("finds by key hash after save", () => {
     const run = makeRun();
     store.saveRun(run);
-    expect(store.findByKeyHash("key-hash-1")?.runId).toBe("run-1");
+    expect(
+      store.findByKeyHash(JobStore.keyHash("default", "key-hash-1"))?.runId,
+    ).toBe("run-1");
   });
 
   it("returns undefined for unknown key hash", () => {
@@ -94,32 +96,47 @@ describe("JobStore — idempotency index", () => {
     store.saveRun(makeRun());
 
     // Simulate crash: delete index but keep record
-    const indexFile = join(dir, "index", "key-hash-1.json");
+    const indexFile = join(
+      dir,
+      "index",
+      `${JobStore.keyHash("default", "key-hash-1")}.json`,
+    );
     rmSync(indexFile, { force: true });
     expect(existsSync(indexFile)).toBe(false);
 
     // findByKeyHash falls back to rebuilding from records
-    expect(store.findByKeyHash("key-hash-1")?.runId).toBe("run-1");
+    expect(
+      store.findByKeyHash(JobStore.keyHash("default", "key-hash-1"))?.runId,
+    ).toBe("run-1");
     expect(existsSync(indexFile)).toBe(true);
   });
 
   it("rebuildIndex restores all indexes", () => {
     store.saveRun(makeRun());
     store.saveRun(
-      makeRun({ idempotencyKeyHash: "key-hash-2", runId: "run-2" }),
+      makeRun({
+        idempotencyKeyHash: JobStore.keyHash("default", "key-hash-2"),
+        runId: "run-2",
+      }),
     );
 
     rmSync(join(dir, "index"), { force: true, recursive: true });
     mkdirSync(join(dir, "index"), { recursive: true });
 
     store.rebuildIndex();
-    expect(store.findByKeyHash("key-hash-1")?.runId).toBe("run-1");
-    expect(store.findByKeyHash("key-hash-2")?.runId).toBe("run-2");
+    expect(
+      store.findByKeyHash(JobStore.keyHash("default", "key-hash-1"))?.runId,
+    ).toBe("run-1");
+    expect(
+      store.findByKeyHash(JobStore.keyHash("default", "key-hash-2"))?.runId,
+    ).toBe("run-2");
   });
 
   it("same key hash finds same run (replay)", () => {
     store.saveRun(makeRun());
-    expect(store.findByKeyHash("key-hash-1")?.runId).toBe("run-1");
+    expect(
+      store.findByKeyHash(JobStore.keyHash("default", "key-hash-1"))?.runId,
+    ).toBe("run-1");
   });
 });
 
@@ -152,17 +169,17 @@ describe("JobStore — canonical hashing", () => {
 
 describe("JobStore — root lock", () => {
   it("acquires and releases lock", () => {
-    expect(store.acquireRootLock("owner-1")).toBe(true);
+    expect(store.acquireRootLock()).toBe(true);
     expect(store.hasRootLock()).toBe(true);
     store.releaseRootLock();
     expect(store.hasRootLock()).toBe(false);
   });
 
   it("denies second acquisition while lock is held", () => {
-    expect(store.acquireRootLock("owner-1")).toBe(true);
-    expect(store.acquireRootLock("owner-2")).toBe(false);
+    expect(store.acquireRootLock()).toBe(true);
+    expect(store.acquireRootLock()).toBe(false);
     store.releaseRootLock();
-    expect(store.acquireRootLock("owner-2")).toBe(true);
+    expect(store.acquireRootLock()).toBe(true);
   });
 });
 

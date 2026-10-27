@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { readPackageVersion } from "@/logic/runtime-paths";
 
 import type {
@@ -15,7 +18,13 @@ import {
   runBusy,
   RunnerError,
 } from "./contract";
-import { generateRunId, JobStore, type StoredRun } from "./job-store";
+import {
+  type CorruptRecord,
+  generateRunId,
+  JobStore,
+  type StoredRun,
+} from "./job-store";
+import { validateAndAdaptNativeExport } from "./native-result-adapter";
 import { summarizeResult } from "./summarize";
 
 /** Why the manager aborted a live run. Set before aborting. */
@@ -151,6 +160,11 @@ export class JobManager {
     return this.cancel(run.runId);
   }
 
+  /** Run records quarantined as corrupt (identifiers and reasons only). */
+  corruptRecords(): CorruptRecord[] {
+    return this.store.corruptRecords();
+  }
+
   async getResult(runId: string): Promise<RunnerResult> {
     const run = this.store.getRun(runId);
     if (!run) {
@@ -175,6 +189,32 @@ export class JobManager {
       throw notFound(runId);
     }
     return this.toSnapshot(run);
+  }
+
+  /**
+   * Turns every persisted non-terminal run that no live executor owns into a
+   * readable `error` result marked as interrupted, keeping any partial
+   * native assertions the interrupted child had exported. Call only after
+   * the store owns the state-root lock, before accepting work.
+   */
+  recoverInterruptedRuns(): string[] {
+    const recovered: string[] = [];
+    for (const run of this.store.allRuns()) {
+      if (isTerminalStatus(run.status) || this.live?.runId === run.runId) {
+        continue;
+      }
+      this.finalize(run, {
+        error: new Error(
+          "Run interrupted: the runner stopped before this run finished",
+        ),
+        partialNative: readPartialNative(
+          this.store.workDir(run.runId),
+          run.runId,
+        ),
+      });
+      recovered.push(run.runId);
+    }
+    return recovered;
   }
 
   /**
@@ -282,7 +322,11 @@ export class JobManager {
   private finalize(
     run: StoredRun,
     outcome:
-      | { error: unknown; reason?: AbortReason }
+      | {
+          error: unknown;
+          partialNative?: RunnerResult["native"];
+          reason?: AbortReason;
+        }
       | { reason?: AbortReason; result: RunnerResult },
   ): void {
     const current = this.store.getRun(run.runId);
@@ -305,7 +349,14 @@ export class JobManager {
         : withLifecycle(outcome.result, status, finishedAt, []);
     } else {
       status = reason ? ABORT_STATUS[reason] : "error";
-      result = buildErrorResult(run, outcome.error, status, finishedAt, reason);
+      result = buildErrorResult(
+        run,
+        outcome.error,
+        status,
+        finishedAt,
+        reason,
+        outcome.partialNative,
+      );
     }
 
     this.store.saveRun({
@@ -374,10 +425,24 @@ function buildErrorResult(
   status: RunStatus,
   finishedAt: string,
   reason: AbortReason | undefined,
+  partialNative?: RunnerResult["native"],
 ): RunnerResult {
   const message = (
     error instanceof Error ? error.message : String(error)
   ).slice(0, ERROR_MESSAGE_MAX);
+  const execution: RunnerResult["execution"] = {
+    error: message,
+    finished_at: finishedAt,
+    started_at: run.createdAt,
+    status,
+  };
+  const native: RunnerResult["native"] = partialNative ?? {
+    assertions: [],
+    coverage_mode: "interoperability",
+    native_suite_status: "ERROR",
+    scenario_outcomes: [],
+    sessions: [],
+  };
   return {
     artifacts: [],
     category: run.request.category,
@@ -390,34 +455,46 @@ function buildErrorResult(
       upstream_repository: "https://github.com/pagopa/wallet-conformance-test",
       version: readPackageVersion(),
     },
-    execution: {
-      error: message,
-      finished_at: finishedAt,
-      started_at: run.createdAt,
-      status,
-    },
+    execution,
     limitations: [
       reason ? ABORT_LIMITATION[reason] : `Execution error: ${message}`,
-      "No native result was collected",
+      partialNative
+        ? "Only partial native assertions exported before the interruption are included"
+        : "No native result was collected",
       "engine.revision is unknown: no trusted build revision is available",
     ],
-    native: {
-      assertions: [],
-      coverage_mode: "interoperability",
-      native_suite_status: "ERROR",
-      scenario_outcomes: [],
-      sessions: [],
-    },
+    native,
     profile_id: run.request.profile_id,
     run_id: run.runId,
     selection: run.request.selection,
-    summary: {
-      assertion_count: 0,
-      native_failed_assertion_count: 0,
-      result: "not_tested",
-    },
+    summary: summarizeResult(execution, native),
     target: run.request.target,
   };
+}
+
+/** Reads a native export left in an interrupted run's workspace, if valid. */
+function readPartialNative(
+  workDir: string,
+  runId: string,
+): RunnerResult["native"] | undefined {
+  const exportPath = join(workDir, "results", "native-results.json");
+  if (!existsSync(exportPath)) return undefined;
+  try {
+    const adapted = validateAndAdaptNativeExport(
+      JSON.parse(readFileSync(exportPath, "utf-8")) as unknown,
+      { expectedRunId: runId },
+    );
+    if (adapted.assertions.length === 0) return undefined;
+    return {
+      assertions: adapted.assertions,
+      coverage_mode: "interoperability",
+      native_suite_status: adapted.status,
+      scenario_outcomes: [],
+      sessions: [{ id: adapted.sessionId, status: adapted.status }],
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**

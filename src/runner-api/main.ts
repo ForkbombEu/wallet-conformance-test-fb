@@ -96,6 +96,24 @@ export async function startRunner(
   const catalogue = loadProfileCatalogue(options.profiles);
 
   const store = new JobStore(options.runRoot);
+  if (!store.acquireRootLock()) {
+    throw new Error(store.describeRootLock());
+  }
+  try {
+    return await startOwnedRunner(store, catalogue, host, port);
+  } catch (error) {
+    // Only this instance's own lock is released.
+    store.releaseRootLock();
+    throw error;
+  }
+}
+
+async function startOwnedRunner(
+  store: JobStore,
+  catalogue: ProfileCatalogue,
+  host: string,
+  port: number,
+): Promise<RunnerMain> {
   const artifacts = new ArtifactStore();
 
   // Real executor: resolve the requested profile and dispatch to the native worker
@@ -125,6 +143,8 @@ export async function startRunner(
   };
 
   const jobManager = new JobManager({ execute, store });
+  // Exclusive ownership is established: settle runs a previous process left.
+  jobManager.recoverInterruptedRuns();
   const app = createRunnerApp({
     artifacts,
     catalogue,

@@ -12,7 +12,7 @@ Per-task handoffs live in `/home/bario/pagopa-followup-20261027/handoffs/`.
 | L09 child config/discovery | DONE for source mode | real Vitest child proven; built mode = L14 |
 | L10 native browser path | DONE | runner child resolves operator driver; callback readiness/cancel; presentation rejected (MVP) |
 | L11 lifecycle truth | DONE | abort reasons, single-write finalization, shutdown gate |
-| L12 recovery/ownership | NOT RUN | |
+| L12 recovery/ownership | DONE | owner-token lock, hash migration, quarantine, restart recovery |
 | L13 persistent evidence | NOT RUN | wire schema still rejects adapter `raw` |
 | L14 built distribution | NOT RUN | |
 | L15 production proof | NOT RUN | |

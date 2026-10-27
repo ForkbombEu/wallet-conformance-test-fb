@@ -16,6 +16,8 @@ Per-task handoffs live in `/home/bario/pagopa-followup-20261027/handoffs/`.
 | L13 persistent evidence | DONE | durable run-scoped manifests, wire validation at publication |
 | L14 built distribution | DONE | dist/runner-api/main.js + wct-runner bin; smoke shipped; build revision; bundled isMainModule fix |
 | L15 production proof | DONE (local gate) | compiled server, real reporter/children, cancel/deadline/SIGTERM/crash/restart |
+| Review 1 fixes | DONE `519b112` | 7 findings |
+| Review 2 fixes | DONE `4d1dd7c` | 6 findings; see pack handoffs/REVIEW-2-FIXES.md |
 | Live SUT | NOT RUN | no operator SUT supplied; return code for review before Credimi/Evidence 20→22 |
 
 ---

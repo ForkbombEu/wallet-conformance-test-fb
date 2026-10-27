@@ -229,10 +229,23 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
   app.get(
     "/v1/runs/:runId/artifacts/:artifactId",
     (req: Request, res: Response) => {
-      const { artifactId } = req.params as { artifactId: string };
+      const { artifactId, runId } = req.params as {
+        artifactId: string;
+        runId: string;
+      };
       if (!isSafeArtifactId(artifactId)) {
         res.status(400).json({
           error: { code: "INVALID_REQUEST", message: "Invalid artifact ID" },
+        });
+        return;
+      }
+      // Bind run_id and artifact_id — artifact must belong to this run
+      if (!artifactId.startsWith(`${runId}:`)) {
+        res.status(404).json({
+          error: {
+            code: "NOT_FOUND",
+            message: `Artifact '${artifactId}' not found in run '${runId}'`,
+          },
         });
         return;
       }

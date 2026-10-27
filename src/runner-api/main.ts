@@ -86,7 +86,21 @@ export async function startRunner(
       request: ctx.request,
     });
 
-    return nativeExecutor(ctx);
+    const evidence = await nativeExecutor(ctx);
+
+    // Register real artifacts from private paths
+    for (const artifactPath of evidence.privateArtifactPaths) {
+      const basename = artifactPath.split("/").pop() ?? "artifact";
+      const artifactId = `${ctx.runId}:${basename}`;
+      artifacts.registerFile(
+        artifactId,
+        basename,
+        "application/json",
+        artifactPath,
+      );
+    }
+
+    return evidence;
   };
 
   const jobManager = new JobManager({ execute, store });

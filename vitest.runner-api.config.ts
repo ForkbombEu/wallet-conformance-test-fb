@@ -14,6 +14,7 @@ export default defineConfig({
   },
   test: {
     exclude: configDefaults.exclude,
+    globalSetup: ["tests/runner-api/build-once.global-setup.ts"],
     include: ["tests/runner-api/**/*.test.ts"],
     pool: "forks",
     poolOptions: {

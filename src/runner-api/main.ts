@@ -20,7 +20,7 @@ import {
   JobManager,
 } from "./job-manager";
 import { JobStore } from "./job-store";
-import { createNativeExecutor } from "./native-worker";
+import { createNativeExecutor, type ProcessAdapter } from "./native-worker";
 import {
   loadProfileCatalogue,
   type Profile,
@@ -43,6 +43,11 @@ export interface RunnerMain {
 export interface RunnerMainOptions {
   host?: string;
   port?: number;
+  /**
+   * Low-level subprocess boundary for the native child (internal; tests
+   * only). Production uses the real `child_process.spawn` adapter.
+   */
+  processAdapter?: ProcessAdapter;
   profiles: string;
   runRoot: string;
 }
@@ -131,7 +136,13 @@ export async function startRunner(
     throw new Error(store.describeRootLock());
   }
   try {
-    return await startOwnedRunner(store, catalogue, host, port);
+    return await startOwnedRunner(
+      store,
+      catalogue,
+      host,
+      port,
+      options.processAdapter,
+    );
   } catch (error) {
     // Only this instance's own lock is released.
     store.releaseRootLock();
@@ -144,6 +155,7 @@ async function startOwnedRunner(
   catalogue: ProfileCatalogue,
   host: string,
   port: number,
+  processAdapter: ProcessAdapter | undefined,
 ): Promise<RunnerMain> {
   const artifacts = new ArtifactStore(store.rootDir);
 
@@ -153,6 +165,7 @@ async function startOwnedRunner(
 
     const nativeExecutor = createNativeExecutor({
       effectiveConfig,
+      processAdapter,
       request: ctx.request,
     });
 

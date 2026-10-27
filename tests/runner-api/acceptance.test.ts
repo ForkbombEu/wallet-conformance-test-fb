@@ -243,8 +243,13 @@ function authHeaders(
 
 // -- Acceptance cases ---------------------------------------------------------
 
+/**
+ * HTTP/JobManager scope with an INJECTED fake executor: these tests exercise
+ * routes, idempotency, lifecycle and artifact serving, not the native worker
+ * or reporter. The real end-to-end gate is production-composition.test.ts.
+ */
 // eslint-disable-next-line max-lines-per-function -- acceptance test suite
-describe("Acceptance — full API/job/config/export integration", () => {
+describe("HTTP + job manager with a fake executor (not production composition)", () => {
   it("starts generic issuer run, exports results, downloads artifact, replays", async () => {
     const fake = createFakeNativeExecute(dir);
     await startTestServer(fake.execute);
@@ -536,7 +541,7 @@ describe("Acceptance — full API/job/config/export integration", () => {
 
 // -- Browser flow (prompt 18) ---------------------------------------------------
 
-describe("Acceptance — browser flow with driver", () => {
+describe("Browser-flow request validation with a fake executor", () => {
   it("browser_redirect without driver is rejected before spawning", async () => {
     const profile = getProfile("credimi-issuance-smoke");
     if (!profile) throw new Error("Profile not found");

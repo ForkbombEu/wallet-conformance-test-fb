@@ -53,7 +53,13 @@ afterEach(() => {
   Reflect.deleteProperty(process.env, "CREDIMI_RUNNER_TOKEN");
 });
 
-describe("Real composition — producer → adapter → summarizer → API", () => {
+/**
+ * Unit scope: a synthetic camelCase producer export fed through the real
+ * adapter and summarizer. This is NOT production composition — no server,
+ * worker, native child or reporter runs here. The production gate is
+ * production-composition.test.ts.
+ */
+describe("Adapter → summarizer (unit, synthetic producer export)", () => {
   it("failed assertion stays fail through the full chain", async () => {
     // 1. Real producer writes export (camelCase)
     const resultsDir = join(dir, "results");

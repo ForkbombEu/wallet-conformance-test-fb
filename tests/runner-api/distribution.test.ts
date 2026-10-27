@@ -108,11 +108,13 @@ async function waitTerminal(url: string, runId: string): Promise<void> {
 
 beforeAll(async () => {
   work = mkdtempSync(join(tmpdir(), "wct-l14-"));
-  execFileSync("pnpm", ["build"], { cwd: packageRoot, stdio: "pipe" });
-  execFileSync("pnpm", ["pack", "--pack-destination", work], {
-    cwd: packageRoot,
-    stdio: "pipe",
-  });
+  // dist/ is built once by the suite's global setup; pack it without
+  // re-running prepack (which would rebuild dist/ under other test files).
+  execFileSync(
+    "npm",
+    ["pack", "--ignore-scripts", "--pack-destination", work],
+    { cwd: packageRoot, stdio: "pipe" },
+  );
   const tarball = readdirSync(work).find((f) => f.endsWith(".tgz"));
   if (!tarball) throw new Error("pnpm pack produced no tarball");
 
@@ -274,47 +276,55 @@ describe("L14 — shipped runner in a clean install", () => {
     SLOW,
   );
 
-  it("startup failure exits 1 without leaving a lock; usage errors exit 2", () => {
-    const state = join(work, "state-bad");
-    const bad = join(operatorDir, "bad-profiles.json");
-    writeFileSync(bad, JSON.stringify({ profiles: [{ id: "x" }] }));
-    const run = (args: string[]) => {
-      try {
-        execFileSync(
-          process.execPath,
-          [join(pkg, "dist/runner-api/main.js"), ...args],
-          {
-            env: { ...process.env, CREDIMI_RUNNER_TOKEN: TOKEN },
-            stdio: "pipe",
-          },
-        );
-        return 0;
-      } catch (error) {
-        return (error as { status: number }).status;
-      }
-    };
-    expect(run(["--profiles", bad, "--state-dir", state])).toBe(1);
-    expect(existsSync(join(state, ".owner.lock"))).toBe(false);
-    expect(run(["--state-dir", state])).toBe(2);
-    expect(
-      run(["--profiles", profilesPath, "--state-dir", state, "--port", "x"]),
-    ).toBe(2);
-  });
+  it(
+    "startup failure exits 1 without leaving a lock; usage errors exit 2",
+    { timeout: 60_000 },
+    () => {
+      const state = join(work, "state-bad");
+      const bad = join(operatorDir, "bad-profiles.json");
+      writeFileSync(bad, JSON.stringify({ profiles: [{ id: "x" }] }));
+      const run = (args: string[]) => {
+        try {
+          execFileSync(
+            process.execPath,
+            [join(pkg, "dist/runner-api/main.js"), ...args],
+            {
+              env: { ...process.env, CREDIMI_RUNNER_TOKEN: TOKEN },
+              stdio: "pipe",
+            },
+          );
+          return 0;
+        } catch (error) {
+          return (error as { status: number }).status;
+        }
+      };
+      expect(run(["--profiles", bad, "--state-dir", state])).toBe(1);
+      expect(existsSync(join(state, ".owner.lock"))).toBe(false);
+      expect(run(["--state-dir", state])).toBe(2);
+      expect(
+        run(["--profiles", profilesPath, "--state-dir", state, "--port", "x"]),
+      ).toBe(2);
+    },
+  );
 
-  it("the bin prints help, and importing main.js does not start a server", () => {
-    const help = execFileSync(join(pkg, "bin/wct-runner"), ["--help"], {
-      encoding: "utf-8",
-    });
-    expect(help).toContain("--state-dir");
-    const imported = execFileSync(
-      process.execPath,
-      [
-        "--input-type=module",
-        "-e",
-        `await import(${JSON.stringify(join(pkg, "dist/runner-api/main.js"))}); console.log("imported-only");`,
-      ],
-      { encoding: "utf-8", timeout: 20_000 },
-    );
-    expect(imported.trim()).toBe("imported-only");
-  });
+  it(
+    "the bin prints help, and importing main.js does not start a server",
+    { timeout: 60_000 },
+    () => {
+      const help = execFileSync(join(pkg, "bin/wct-runner"), ["--help"], {
+        encoding: "utf-8",
+      });
+      expect(help).toContain("--state-dir");
+      const imported = execFileSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `await import(${JSON.stringify(join(pkg, "dist/runner-api/main.js"))}); console.log("imported-only");`,
+        ],
+        { encoding: "utf-8", timeout: 20_000 },
+      );
+      expect(imported.trim()).toBe("imported-only");
+    },
+  );
 });

@@ -88,6 +88,9 @@ export class ConformanceReporter implements Reporter {
         title,
         vitestStatus,
       });
+      // Keep a readable OPEN export so an interrupted run keeps the
+      // assertions collected so far.
+      this.writeNativeResults("OPEN");
     }
   }
 
@@ -167,7 +170,7 @@ export class ConformanceReporter implements Reporter {
     return "PASSED";
   }
 
-  private writeNativeResults(dbStatus: SessionStatus): void {
+  private writeNativeResults(dbStatus: "OPEN" | SessionStatus): void {
     const outputDir = process.env.WCT_RESULTS_DIR;
     const runId = process.env.WCT_RUN_ID;
 
@@ -178,12 +181,13 @@ export class ConformanceReporter implements Reporter {
     const startedAt =
       this.collectedAssertions[0]?.timestamp ?? new Date().toISOString();
 
+    const open = dbStatus === "OPEN";
     const exportStatus: NativeExport["status"] =
-      this.collectedAssertions.length === 0 ? "INCOMPLETE" : dbStatus;
+      !open && this.collectedAssertions.length === 0 ? "INCOMPLETE" : dbStatus;
 
     const data = buildNativeExport({
       assertions: this.collectedAssertions,
-      closedAt: new Date().toISOString(),
+      closedAt: open ? null : new Date().toISOString(),
       phase: this.testType,
       runId,
       sessionId: this.sessionId,
@@ -193,7 +197,7 @@ export class ConformanceReporter implements Reporter {
 
     mkdirSync(outputDir, { recursive: true });
     writeNativeExport(outputDir, data);
-    console.log(`Native results written to ${outputDir}`);
+    if (!open) console.log(`Native results written to ${outputDir}`);
   }
 }
 

@@ -271,11 +271,17 @@ export function createNativeExecutor(
       sessions: [{ id: adapted.sessionId, status: adapted.status }],
     };
 
+    // An OPEN session was never closed by the reporter: the child stopped
+    // mid-suite. Its assertions are kept, but the execution is incomplete.
+    const sessionClosed = adapted.status !== "OPEN";
     const execution: RunnerResult["execution"] = {
+      ...(sessionClosed
+        ? {}
+        : { error: "native session did not close; the suite was interrupted" }),
       exit_code: exitCode ?? undefined,
       finished_at: finishedAt,
       started_at: startedAt,
-      status: exitCode === 0 ? "completed" : "completed",
+      status: sessionClosed ? "completed" : "error",
     };
 
     const summary = summarizeResult(execution, native);
@@ -290,7 +296,14 @@ export function createNativeExecutor(
         contract_version: "1.0",
         engine: engineIdentity(),
         execution,
-        limitations: engineLimitations(),
+        limitations: [
+          ...(sessionClosed
+            ? []
+            : [
+                "Native session did not close: only assertions reported before the interruption are included",
+              ]),
+          ...engineLimitations(),
+        ],
         native,
         profile_id: effectiveConfig.profileId,
         run_id: runId,

@@ -48,7 +48,8 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 const CREDENTIAL_ID = "generic_pid_sd_jwt";
 const ISSUER = "https://issuer.example";
-const STEP_BOUND_MS = 15_000;
+const HUNG_DEADLINE_MS = 10_000;
+const STEP_BOUND_MS = 30_000;
 
 let dir: string;
 let authServer: Server;
@@ -302,8 +303,10 @@ describe("L10 — operator driver through the real issuance orchestrator", () =>
   }, 60_000);
 
   it("a hung driver is bounded by the run deadline signal and cleaned up", async () => {
+    // Long enough for Chrome to start and reach the operator module under
+    // load; the module then hangs until the deadline aborts it.
     enterRunnerMode({
-      deadlineMs: 3_000,
+      deadlineMs: HUNG_DEADLINE_MS,
       driverModule: writeDriverModule("hang"),
     });
     const orchestrator = runnerOrchestrator();

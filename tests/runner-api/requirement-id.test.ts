@@ -22,6 +22,19 @@ describe("extractRequirementId", () => {
     expect(extractRequirementId("CI_015a: deferred issuance")).toBe("CI_015a");
   });
 
+  it("extracts bracketed IDs", () => {
+    expect(extractRequirementId("[WP_082]: bracketed requirement")).toBe(
+      "WP_082",
+    );
+    expect(extractDescription("[WP_082]: bracketed requirement")).toBe(
+      "bracketed requirement",
+    );
+  });
+
+  it("rejects unbalanced brackets", () => {
+    expect(extractRequirementId("[WP_082: missing bracket")).toBeNull();
+  });
+
   it("returns null for generic titles without IDs", () => {
     expect(
       extractRequirementId("completes the authorization-code issuance flow"),

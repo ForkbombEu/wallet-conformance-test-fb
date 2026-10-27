@@ -97,7 +97,14 @@ const runOverridesSchema = z
         "must contain unique values",
       )
       .optional(),
-    credential_offer_uri: safeString.optional(),
+    // Same schemes the native loader accepts (src/types/config.ts).
+    credential_offer_uri: safeString
+      .refine(
+        (v) =>
+          /^(https:\/\/|haip-vci:\/\/|openid-credential-offer:\/\/)/.test(v),
+        "must use https://, haip-vci:// or openid-credential-offer://",
+      )
+      .optional(),
     issuer_url: z
       .string()
       .url()

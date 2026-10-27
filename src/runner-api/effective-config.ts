@@ -23,6 +23,8 @@ export interface EffectiveConfig {
   coverageMode: Profile["coverageMode"];
   /** issuance.credential_types after applying credential_configuration_ids. */
   credentialConfigurationIds: string[];
+  /** Absolute operator asset paths seeded into per-run backup storage. */
+  initializedAssets: string[];
   overrides: RunOverrides;
   profileConfigPath: string;
   profileId: string;
@@ -32,6 +34,7 @@ export interface EffectiveConfig {
   };
   testFile: string;
   writablePaths: {
+    attestation: string;
     backup: string;
     credentials: string;
     db: string;
@@ -93,6 +96,7 @@ export function buildEffectiveConfig(
     category: profile.category,
     coverageMode: profile.coverageMode,
     credentialConfigurationIds,
+    initializedAssets: profile.initializedAssets ?? [],
     overrides,
     profileConfigPath: profile.configFile,
     profileId: profile.id,
@@ -102,6 +106,7 @@ export function buildEffectiveConfig(
     },
     testFile: selection.testFile,
     writablePaths: {
+      attestation: `${ws}/data/attestation`,
       backup: `${ws}/data/backup`,
       credentials: `${ws}/data/credentials`,
       db: `${ws}/data/wct.db`,

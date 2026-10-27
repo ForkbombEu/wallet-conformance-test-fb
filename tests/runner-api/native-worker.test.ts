@@ -7,6 +7,7 @@ import type { RunRequest } from "@/runner-api/contract";
 import type { EffectiveConfig } from "@/runner-api/effective-config";
 import type { Config } from "@/types";
 
+import { packageRoot, resolveSelectionTestFile } from "@/logic/runtime-paths";
 import { buildEffectiveConfig } from "@/runner-api/effective-config";
 import {
   createNativeExecutor,
@@ -75,14 +76,20 @@ function makeBaseConfig(): Config {
   };
 }
 
-function makeEffectiveConfig(): EffectiveConfig {
-  return buildEffectiveConfig(
+function makeEffectiveConfig(workspace = dir): EffectiveConfig {
+  const effective = buildEffectiveConfig(
     requireProfile("credimi-issuance-smoke"),
     "credimi-issuance-smoke",
     {},
     makeBaseConfig(),
-    "/tmp/wct-run",
+    workspace,
   );
+  // The worker requires real absolute selection/INI paths before spawning.
+  return {
+    ...effective,
+    profileConfigPath: join(packageRoot, "config.example.ini"),
+    testFile: resolveSelectionTestFile(effective.testFile),
+  };
 }
 
 function makeFakeAdapter(
@@ -268,17 +275,35 @@ describe("native-worker — profile immutability", () => {
 });
 
 describe("native-worker — distinct DBs", () => {
+  it("rejects writable paths outside the run workspace", async () => {
+    const { adapter, spawns } = makeFakeAdapter();
+    const execute = createNativeExecutor({
+      effectiveConfig: makeEffectiveConfig(join(dir, "other-run")),
+      processAdapter: adapter,
+      request: makeRequest(),
+    });
+    await expect(
+      execute({
+        abortSignal: new AbortController().signal,
+        request: makeRequest(),
+        runId: "run-x",
+        runRoot: join(dir, "run-x"),
+      }),
+    ).rejects.toThrow(/outside the run workspace/);
+    expect(spawns).toHaveLength(0);
+  });
+
   it("different runs get different WCT_DB_PATH", async () => {
     const { adapter, spawns } = makeFakeAdapter();
-    const eff = makeEffectiveConfig();
 
     for (const runId of ["run-a", "run-b"]) {
+      const runDir = join(dir, runId);
+      // Production resolves effective config per run workspace (resolveRun).
       const execute = createNativeExecutor({
-        effectiveConfig: eff,
+        effectiveConfig: makeEffectiveConfig(runDir),
         processAdapter: adapter,
         request: makeRequest(),
       });
-      const runDir = join(dir, runId);
       mkdirSync(runDir, { recursive: true });
       await execute({
         abortSignal: new AbortController().signal,

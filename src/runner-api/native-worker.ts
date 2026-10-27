@@ -1,6 +1,15 @@
+import type { Readable } from "node:stream";
+
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { readPackageVersion } from "@/logic/runtime-paths";
 import {
@@ -18,6 +27,7 @@ import type {
 } from "./job-manager";
 
 import { validateAndAdaptNativeExport } from "./native-result-adapter";
+import { materializeRunIni } from "./run-ini";
 import { summarizeResult } from "./summarize";
 
 // ---------------------------------------------------------------------------
@@ -33,6 +43,8 @@ export interface SpawnedProcess {
   on(event: "error", listener: (err: Error) => void): void;
   on(event: "exit", listener: (code: null | number) => void): void;
   pid: number | undefined;
+  stderr?: null | Readable;
+  stdout?: null | Readable;
 }
 
 export interface SpawnOptions {
@@ -48,6 +60,17 @@ export const defaultProcessAdapter: ProcessAdapter = {
     return spawn(command, args, options) as unknown as SpawnedProcess;
   },
 };
+
+/** Bytes of each child stream retained on disk; the rest is drained. */
+export const NATIVE_LOG_CAP_BYTES = 4 * 1024 * 1024;
+const KILL_ESCALATION_MS = 2_000;
+const ERROR_TAIL_BYTES = 4_096;
+
+/**
+ * Environment prefixes owned by the native loader/reporter. Values inherited
+ * from the runner's own environment must never leak into a run.
+ */
+const NATIVE_ENV_PREFIXES = ["CONFIG_", "WCT_"];
 
 // ---------------------------------------------------------------------------
 // Native executor
@@ -65,6 +88,54 @@ const ENGINE_INFO = {
   upstream_repository: "https://github.com/pagopa/wallet-conformance-test",
 };
 
+interface DrainedStream {
+  done: Promise<void>;
+  tail(): string;
+}
+
+/**
+ * Builds the native child environment: inherited CONFIG_* / WCT_* / TESTS
+ * values are removed, then the run's effective INI, discovery root, typed
+ * overrides and per-run writable paths are set explicitly.
+ */
+export function buildNativeEnv(
+  effectiveConfig: EffectiveConfig,
+  paths: { effectiveIni: string; resultsDir: string; runId: string },
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(baseEnv)) {
+    if (key === "TESTS") continue;
+    if (NATIVE_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+    env[key] = value;
+  }
+
+  const overrides = effectiveConfig.overrides;
+  env.NODE_OPTIONS = getNodeOptionsWithExperimentalWarningDisabled(
+    baseEnv.NODE_OPTIONS,
+  );
+  env.CONFIG_FILE_INI = paths.effectiveIni;
+  env[
+    effectiveConfig.category === "issuance"
+      ? "CONFIG_ISSUANCE_TESTS_DIR"
+      : "CONFIG_PRESENTATION_TESTS_DIR"
+  ] = dirname(effectiveConfig.testFile);
+  env.CONFIG_CREDENTIAL_ISSUER_URI = effectiveConfig.target.issuerIdentifier;
+  env.CONFIG_AUTHORIZATION_INTERACTION =
+    effectiveConfig.authorizationInteraction;
+  if (effectiveConfig.credentialConfigurationIds.length > 0) {
+    env.CONFIG_CREDENTIAL_TYPES =
+      effectiveConfig.credentialConfigurationIds.join(",");
+  }
+  if (overrides.credential_offer_uri) {
+    env.CONFIG_CREDENTIAL_OFFER_URI = overrides.credential_offer_uri;
+  }
+  env.WCT_DB_PATH = effectiveConfig.writablePaths.db;
+  env.WCT_RESULTS_DIR = paths.resultsDir;
+  env.WCT_RUN_ID = paths.runId;
+  return env;
+}
+
 export function createNativeExecutor(
   options: NativeExecutorOptions,
 ): ExecuteFn {
@@ -74,61 +145,55 @@ export function createNativeExecutor(
     const { runId, runRoot } = ctx;
     const { effectiveConfig, request } = options;
 
-    const resultsDir = join(runRoot, "results");
-    const dataDir = join(runRoot, "data");
-    const dbPath = join(dataDir, "wct.db");
+    // A cancelled/expired run must never spawn.
+    ctx.abortSignal.throwIfAborted();
 
-    // Build env with per-run isolation and effective config
     const testFile = effectiveConfig.testFile;
-    const testDir = testFile.includes("/")
-      ? testFile.substring(0, testFile.lastIndexOf("/"))
-      : ".";
-
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      CONFIG_FILE_INI: effectiveConfig.profileConfigPath,
-      CONFIG_ISSUANCE_TESTS_DIR: testDir,
-      NODE_OPTIONS: getNodeOptionsWithExperimentalWarningDisabled(
-        process.env.NODE_OPTIONS,
-      ),
-      WCT_DB_PATH: dbPath,
-      WCT_RESULTS_DIR: resultsDir,
-      WCT_RUN_ID: runId,
-    };
-
-    // Apply typed overrides to child env
-    if (request.parameters?.issuer_url) {
-      env.CONFIG_CREDENTIAL_ISSUER_URI = request.parameters.issuer_url;
+    if (!isAbsolute(testFile) || !existsSync(testFile)) {
+      throw new Error(`Selected native test file not found: ${testFile}`);
     }
-    if (request.parameters?.credential_offer_uri) {
-      env.CONFIG_CREDENTIAL_OFFER_URI = request.parameters.credential_offer_uri;
-    }
-    if (request.parameters?.authorization_interaction) {
-      env.CONFIG_AUTHORIZATION_INTERACTION =
-        request.parameters.authorization_interaction;
-    }
-    if (request.parameters?.credential_configuration_ids?.length) {
-      env.CONFIG_CREDENTIAL_TYPES =
-        request.parameters.credential_configuration_ids.join(",");
+    if (!existsSync(effectiveConfig.profileConfigPath)) {
+      throw new Error(
+        `Profile INI not found: ${effectiveConfig.profileConfigPath}`,
+      );
     }
 
-    // Determine config file and test target
+    for (const writable of Object.values(effectiveConfig.writablePaths)) {
+      if (!writable.startsWith(`${runRoot}/`)) {
+        throw new Error(
+          `Writable path ${writable} is outside the run workspace ${runRoot}`,
+        );
+      }
+    }
+
+    const resultsDir = join(runRoot, "results");
+    const logsDir = join(runRoot, "logs");
+    mkdirSync(resultsDir, { recursive: true });
+    mkdirSync(logsDir, { recursive: true });
+
+    const effectiveIni = materializeRunIni({
+      initializedAssets: effectiveConfig.initializedAssets,
+      operatorIni: effectiveConfig.profileConfigPath,
+      runRoot,
+      writablePaths: effectiveConfig.writablePaths,
+    });
+    const env = buildNativeEnv(effectiveConfig, {
+      effectiveIni,
+      resultsDir,
+      runId,
+    });
+
     const category = effectiveConfig.category;
     const configPath = resolveVitestConfigPath(category);
     const vitestBin = resolveVitestBin();
 
-    // Test selection: pass the test file as a filter pattern
-    const args = [
-      vitestBin,
-      "run",
-      "--config",
-      configPath,
-      effectiveConfig.testFile,
-    ];
+    // The include root is the selection's parent; the positional filter
+    // narrows discovery to the selected file inside it.
+    const args = [vitestBin, "run", "--config", configPath, testFile];
 
     const startedAt = new Date().toISOString();
 
-    // Spawn the process
+    ctx.abortSignal.throwIfAborted();
     const child = adapter.spawn(process.execPath, args, {
       cwd: runRoot,
       detached: true,
@@ -137,62 +202,40 @@ export function createNativeExecutor(
       stdio: "pipe",
     });
 
-    // Wait for exit or abort
-    const exitCode = await new Promise<null | number>((resolve, reject) => {
-      let settled = false;
+    const stdoutLog = drainToFile(child.stdout, join(logsDir, "stdout.log"));
+    const stderrLog = drainToFile(child.stderr, join(logsDir, "stderr.log"));
 
-      const settle = (code: null | number) => {
-        if (!settled) {
-          settled = true;
-          resolve(code);
-        }
-      };
-
-      child.on("exit", (code) => settle(code));
-      child.on("error", (err) => {
-        if (!settled) {
-          settled = true;
-          reject(err);
-        }
-      });
-
-      ctx.abortSignal.addEventListener("abort", () => {
-        // Graceful termination then escalate
-        if (child.pid) {
-          try {
-            process.kill(-child.pid, "SIGTERM");
-          } catch {
-            // group may already be gone
-          }
-          setTimeout(() => {
-            if (!settled && child.pid) {
-              try {
-                process.kill(-child.pid, "SIGKILL");
-              } catch {
-                // ignore
-              }
-            }
-          }, 2_000);
-        }
-      });
-    });
+    const exitCode = await waitForChild(child, ctx.abortSignal);
+    await Promise.all([stdoutLog.done, stderrLog.done]);
+    const stderrTail = stderrLog.tail() || stdoutLog.tail();
 
     const finishedAt = new Date().toISOString();
 
     // Read and validate native export
     const exportPath = join(resultsDir, "native-results.json");
     let adapted: null | ReturnType<typeof validateAndAdaptNativeExport> = null;
+    let exportProblem = "native export missing";
 
     if (existsSync(exportPath)) {
       try {
         const raw = readFileSync(exportPath, "utf-8");
-        const parsed = JSON.parse(raw);
+        const parsed: unknown = JSON.parse(raw);
         adapted = validateAndAdaptNativeExport(parsed, {
           expectedRunId: runId,
         });
-      } catch {
+      } catch (error) {
+        exportProblem = `native export unreadable: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
         adapted = null;
       }
+    }
+
+    // A launch/config/discovery failure (no tests collected, nonzero exit)
+    // is an execution error, not a readable conformance result.
+    if (adapted && adapted.assertions.length === 0 && exitCode !== 0) {
+      exportProblem = "no native tests were collected";
+      adapted = null;
     }
 
     // Missing/corrupt/mismatched export → error
@@ -206,7 +249,8 @@ export function createNativeExecutor(
           startedAt,
           finishedAt,
           exitCode,
-          "",
+          stderrTail,
+          exportProblem,
         ),
       };
     }
@@ -274,6 +318,7 @@ function buildErrorResult(
   finishedAt: string,
   exitCode: null | number,
   stderr: string,
+  problem: string,
 ): RunnerResult {
   return {
     artifacts: [],
@@ -285,13 +330,13 @@ function buildErrorResult(
       version: readPackageVersion(),
     },
     execution: {
-      error: truncate(stderr, 4096) || "native export missing or corrupt",
+      error: truncate(stderr, ERROR_TAIL_BYTES) || problem,
       exit_code: exitCode ?? undefined,
       finished_at: finishedAt,
       started_at: startedAt,
       status: "error",
     },
-    limitations: ["Native export was missing or unreadable"],
+    limitations: [`Native execution produced no readable result: ${problem}`],
     native: {
       assertions: [],
       coverage_mode: effectiveConfig.coverageMode,
@@ -311,6 +356,93 @@ function buildErrorResult(
   };
 }
 
+/**
+ * Always consumes a child stream so the child can never block on a full
+ * pipe. The first NATIVE_LOG_CAP_BYTES go to a private run log; a short tail
+ * is kept in memory for error diagnostics.
+ */
+function drainToFile(
+  stream: null | Readable | undefined,
+  filePath: string,
+): DrainedStream {
+  if (!stream) {
+    return { done: Promise.resolve(), tail: () => "" };
+  }
+  const fd = openSync(filePath, "w", 0o600);
+  let written = 0;
+  let tail = Buffer.alloc(0);
+
+  const done = new Promise<void>((resolve) => {
+    const finish = () => {
+      try {
+        closeSync(fd);
+      } catch {
+        // already closed
+      }
+      resolve();
+    };
+    stream.on("data", (chunk: Buffer) => {
+      if (written < NATIVE_LOG_CAP_BYTES) {
+        const slice = chunk.subarray(0, NATIVE_LOG_CAP_BYTES - written);
+        writeSync(fd, slice);
+        written += slice.length;
+      }
+      tail = Buffer.concat([tail, chunk]).subarray(-ERROR_TAIL_BYTES);
+    });
+    stream.once("end", finish);
+    stream.once("close", finish);
+    stream.once("error", finish);
+  });
+
+  return { done, tail: () => tail.toString("utf-8").trim() };
+}
+
+function killGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // group already gone
+  }
+}
+
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
+}
+
+/**
+ * Waits for the native child to exit. On abort the whole process group gets
+ * SIGTERM, escalating to SIGKILL. After exit any surviving descendant in the
+ * group is killed, so nothing outlives the run.
+ */
+function waitForChild(
+  child: SpawnedProcess,
+  signal: AbortSignal,
+): Promise<null | number> {
+  return new Promise<null | number>((resolve, reject) => {
+    let settled = false;
+    let escalation: NodeJS.Timeout | undefined;
+
+    const onAbort = () => {
+      if (!child.pid) return;
+      killGroup(child.pid, "SIGTERM");
+      escalation = setTimeout(() => {
+        if (!settled && child.pid) killGroup(child.pid, "SIGKILL");
+      }, KILL_ESCALATION_MS);
+    };
+
+    const finish = (err: Error | undefined, code: null | number) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(escalation);
+      signal.removeEventListener("abort", onAbort);
+      if (child.pid) killGroup(child.pid, "SIGKILL");
+      if (err) reject(err);
+      else resolve(code);
+    };
+
+    child.on("exit", (code) => finish(undefined, code));
+    child.on("error", (err) => finish(err, null));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+  });
 }

@@ -1,10 +1,32 @@
 # Rolling Handoff — Legacy Repairs (`wallet-conformance-test-fb`)
 
+## Follow-up pack 2026-10-27 (L08–L15) — CURRENT STATUS
+
+The L01–L07 table further below is historical; the 2026-10-27 review found
+several of those "Done" claims only partial. Statuses here are authoritative.
+Per-task handoffs live in `/home/bario/pagopa-followup-20261027/handoffs/`.
+
+| Task | Status | Notes |
+|------|--------|-------|
+| L08 profile/INI startup | DONE (audited + completed) | catalogue drives HTTP + executor; port-0 URL fixed |
+| L09 child config/discovery | DONE for source mode | real Vitest child proven; built mode = L14 |
+| L10 native browser path | NOT DONE | |
+| L11 lifecycle truth | PARTIAL (wip checkpoint `99b3ad0`) | |
+| L12 recovery/ownership | NOT RUN | |
+| L13 persistent evidence | NOT RUN | wire schema still rejects adapter `raw` |
+| L14 built distribution | NOT RUN | |
+| L15 production proof | NOT RUN | |
+| Live SUT | NOT RUN | no operator SUT supplied |
+
+---
+
+# Historical (L01–L07, pre-review claims)
+
 **Repository:** `ForkbombEu/wallet-conformance-test-fb`
 **Branch:** `main`
 **HEAD:** `271a23ea8d0505198cce74f0bbf32a3c93e08f8c`
 **Repair pack:** `/home/bario/pagopa-runner-repairs-20261027/`
-**Status:** All 7 prompts complete. Pushed to origin/main.
+**Status (historical claim, superseded by the review):** All 7 prompts complete.
 
 ---
 

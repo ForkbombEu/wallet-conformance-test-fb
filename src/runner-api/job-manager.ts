@@ -253,20 +253,25 @@ export class JobManager {
 
       clearTimeout(deadlineTimer);
 
-      // Late completion must not overwrite terminal state or pending cancel
+      // Late completion must not overwrite terminal state
       const current = this.store.getRun(run.runId);
       if (current && isTerminalStatus(current.status)) {
         return;
       }
+
+      // Determine correct terminal status from result and context
+      let terminalStatus: RunStatus = "completed";
       if (current?.cancelRequested) {
-        return;
+        terminalStatus = "cancelled";
+      } else if (evidence.result.execution.status === "error") {
+        terminalStatus = "error";
       }
 
       // Persist result BEFORE setting terminal state
       this.updateRun(run.runId, (r) => ({
         ...r,
         result: evidence.result,
-        status: "completed",
+        status: terminalStatus,
       }));
     } catch (error) {
       clearTimeout(deadlineTimer);
@@ -275,16 +280,19 @@ export class JobManager {
       if (current && isTerminalStatus(current.status)) {
         return;
       }
-      if (current?.cancelRequested) {
-        return;
-      }
 
-      // Determine if this was a timeout or error
-      const isTimeout = abortController.signal.aborted;
-      const terminalStatus: RunStatus = isTimeout ? "timed_out" : "error";
+      // Determine if this was a timeout, cancellation, or error
+      const isTimeout =
+        abortController.signal.aborted && !current?.cancelRequested;
+      const isCancel = current?.cancelRequested === true;
+      const terminalStatus: RunStatus = isCancel
+        ? "cancelled"
+        : isTimeout
+          ? "timed_out"
+          : "error";
 
-      // Persist minimal honest envelope on error/timeout
-      const errorResult = buildErrorResult(run, error);
+      // Persist minimal honest envelope on error/timeout/cancel
+      const errorResult = buildErrorResult(run, error, terminalStatus);
       this.updateRun(run.runId, (r) => ({
         ...r,
         result: errorResult,
@@ -319,7 +327,11 @@ export class JobManager {
   }
 }
 
-function buildErrorResult(run: StoredRun, error: unknown): RunnerResult {
+function buildErrorResult(
+  run: StoredRun,
+  error: unknown,
+  terminalStatus: RunStatus = "error",
+): RunnerResult {
   const message = error instanceof Error ? error.message : String(error);
   return {
     artifacts: [],
@@ -336,7 +348,7 @@ function buildErrorResult(run: StoredRun, error: unknown): RunnerResult {
     execution: {
       error: message,
       started_at: run.createdAt,
-      status: "error",
+      status: terminalStatus,
     },
     limitations: ["Infrastructure error: " + message],
     native: {

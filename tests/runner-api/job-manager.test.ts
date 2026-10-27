@@ -298,15 +298,15 @@ describe("JobManager — getSnapshot / getResult", () => {
     await mgr.shutdown();
   });
 
-  it("getResult after cancellation throws RESULT_NOT_READY (no result stored)", async () => {
+  it("getResult after cancellation returns a readable cancelled envelope", async () => {
     const execute = makeSlowExecute(10_000);
     const mgr = new JobManager({ execute, store });
 
     const { snapshot } = await mgr.submit(makeRequest(), "key-1");
     await mgr.cancel(snapshot.run_id);
-    await expect(mgr.getResult(snapshot.run_id)).rejects.toMatchObject({
-      code: "RESULT_UNAVAILABLE",
-    });
+    const result = await mgr.getResult(snapshot.run_id);
+    expect(result.execution.status).toBe("cancelled");
+    expect((await mgr.getSnapshot(snapshot.run_id)).status).toBe("cancelled");
     await mgr.shutdown();
   });
 });

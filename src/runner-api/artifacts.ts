@@ -42,8 +42,30 @@ export interface ArtifactContent {
 
 export type ArtifactManifestEntry = z.infer<typeof manifestEntrySchema>;
 
+export interface ArtifactStoreOptions {
+  /**
+   * Reads a declared private source file (internal seam; tests only).
+   * Production reads the file system directly.
+   */
+  readSource?: (path: string) => Buffer;
+}
+
+/** A declared artifact whose initial publication failed. */
+export interface PublicationFailure {
+  filename: string;
+  reason:
+    | "duplicate"
+    | "missing"
+    | "oversize"
+    | "unreadable"
+    | "unsafe_name"
+    | "write_failed";
+}
+
 export interface PublishedArtifacts {
   entries: ArtifactManifestEntry[];
+  /** Declared artifacts that were not published, with a typed reason. */
+  failed: PublicationFailure[];
   /** Human-readable problems; never contain private filesystem paths. */
   limitations: string[];
 }
@@ -61,10 +83,12 @@ export interface PublishedArtifacts {
  * operator removes the state root.
  */
 export class ArtifactStore {
+  private readonly readSource: (path: string) => Buffer;
   private readonly root: string;
 
-  constructor(stateRoot: string) {
+  constructor(stateRoot: string, options: ArtifactStoreOptions = {}) {
     this.root = join(stateRoot, "artifacts");
+    this.readSource = options.readSource ?? ((path) => readFileSync(path));
   }
 
   /** The persisted manifest of a run, if it was published. */
@@ -99,41 +123,59 @@ export class ArtifactStore {
       throw new Error(`Unsafe run id for artifacts: ${runId}`);
     }
     const existing = this.manifest(runId);
-    if (existing) return { entries: existing, limitations: [] };
+    if (existing) return { entries: existing, failed: [], limitations: [] };
 
     const filesDir = join(this.root, runId, "files");
     mkdirSync(filesDir, { recursive: true });
     const entries: ArtifactManifestEntry[] = [];
+    const failed: PublicationFailure[] = [];
     const limitations: string[] = [];
+    const fail = (
+      filename: string,
+      reason: PublicationFailure["reason"],
+      limitation: string,
+    ) => {
+      failed.push({ filename, reason });
+      limitations.push(limitation);
+    };
 
     for (const source of sourcePaths) {
       const filename = basename(source);
       const artifactId = filename;
       if (!isSafeArtifactId(artifactId)) {
-        limitations.push(`Artifact '${filename}' has an unsafe name`);
+        fail(
+          filename,
+          "unsafe_name",
+          `Artifact '${filename}' has an unsafe name`,
+        );
         continue;
       }
       if (entries.some((e) => e.artifact_id === artifactId)) {
-        limitations.push(`Duplicate artifact '${filename}' was skipped`);
+        fail(
+          filename,
+          "duplicate",
+          `Duplicate artifact '${filename}' was skipped`,
+        );
         continue;
       }
-      let content: Buffer;
-      try {
-        const size = statSync(source).size;
-        if (size > MAX_ARTIFACT_BYTES) {
-          limitations.push(
-            `Artifact '${filename}' (${size} bytes) exceeds the ${MAX_ARTIFACT_BYTES}-byte cap and was not published`,
-          );
-          continue;
-        }
-        content = readFileSync(source);
-      } catch {
-        limitations.push(`Declared artifact '${filename}' is missing`);
+      const read = this.readDeclared(source, filename);
+      if ("reason" in read) {
+        fail(filename, read.reason, read.limitation);
         continue;
       }
+      const content = read.content;
       const target = join(filesDir, artifactId);
-      writeFileSync(`${target}.tmp`, content, { mode: 0o600 });
-      renameSync(`${target}.tmp`, target);
+      try {
+        writeFileSync(`${target}.tmp`, content, { mode: 0o600 });
+        renameSync(`${target}.tmp`, target);
+      } catch (error) {
+        fail(
+          filename,
+          "write_failed",
+          `Artifact '${filename}' could not be stored (${errorCode(error)})`,
+        );
+        continue;
+      }
       entries.push({
         artifact_id: artifactId,
         download_url: `/v1/runs/${runId}/artifacts/${encodeURIComponent(artifactId)}`,
@@ -151,7 +193,7 @@ export class ArtifactStore {
       { mode: 0o600 },
     );
     renameSync(`${manifestPath}.tmp`, manifestPath);
-    return { entries, limitations };
+    return { entries, failed, limitations };
   }
 
   /**
@@ -190,6 +232,49 @@ export class ArtifactStore {
   private manifestPath(runId: string): string {
     return join(this.root, runId, "manifest.json");
   }
+
+  /** Reads a declared source within the size cap, or explains why not. */
+  private readDeclared(
+    source: string,
+    filename: string,
+  ):
+    | { content: Buffer }
+    | { limitation: string; reason: PublicationFailure["reason"] } {
+    const unavailable = (error: unknown) =>
+      errorCode(error) === "ENOENT"
+        ? {
+            limitation: `Declared artifact '${filename}' is missing`,
+            reason: "missing" as const,
+          }
+        : {
+            limitation: `Declared artifact '${filename}' could not be read (${errorCode(error)})`,
+            reason: "unreadable" as const,
+          };
+    let size: number;
+    try {
+      size = statSync(source).size;
+    } catch (error) {
+      return unavailable(error);
+    }
+    if (size > MAX_ARTIFACT_BYTES) {
+      return {
+        limitation: `Artifact '${filename}' (${size} bytes) exceeds the ${MAX_ARTIFACT_BYTES}-byte cap and was not published`,
+        reason: "oversize",
+      };
+    }
+    try {
+      return { content: this.readSource(source) };
+    } catch (error) {
+      return unavailable(error);
+    }
+  }
+}
+
+/** The error's code (e.g. ENOENT); never its message, which has paths. */
+export function errorCode(error: unknown): string {
+  const code =
+    error instanceof Error && "code" in error ? error.code : undefined;
+  return typeof code === "string" && code.length > 0 ? code : "error";
 }
 
 /**

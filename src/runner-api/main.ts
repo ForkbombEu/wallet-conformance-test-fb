@@ -2,7 +2,7 @@ import type { Express } from "express";
 
 import { realpathSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -10,7 +10,7 @@ import type { Config } from "@/types";
 
 import type { RunnerResult, RunRequest } from "./contract";
 
-import { ArtifactStore } from "./artifacts";
+import { ArtifactStore, errorCode, type PublishedArtifacts } from "./artifacts";
 import {
   buildEffectiveConfig,
   type EffectiveConfig,
@@ -32,6 +32,7 @@ import {
   selectProfileForRequest,
 } from "./profiles";
 import { createRunnerApp } from "./server";
+import { applyEvidenceCompleteness } from "./summarize";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8789;
@@ -44,6 +45,11 @@ export interface RunnerMain {
 }
 
 export interface RunnerMainOptions {
+  /**
+   * Reads a declared evidence file for publication (internal; tests only).
+   * Production reads the file system directly.
+   */
+  artifactSourceReader?: (path: string) => Buffer;
   host?: string;
   port?: number;
   /**
@@ -85,23 +91,54 @@ export function loadProfiles(profilesPath: string): Profile[] {
  * Publishes a run's declared private files through the artifact layer and
  * returns the evidence with the manifest entries computed from the exact
  * bytes. A declared artifact that cannot be published becomes a limitation
- * and the summary can no longer be `pass`.
+ * and a typed `unpublishedArtifacts` input, so the aggregate can no longer be
+ * `pass` (native verdicts are kept). A publication exception keeps the native
+ * data and publishes nothing.
  */
 export function publishRunEvidence(
   artifacts: ArtifactStore,
   runId: string,
   evidence: ExecutionEvidence,
 ): ExecutionEvidence {
-  const published = artifacts.publish(runId, evidence.privateArtifactPaths);
+  let published: PublishedArtifacts;
+  try {
+    published = artifacts.publish(runId, evidence.privateArtifactPaths);
+  } catch (error) {
+    published = {
+      entries: [],
+      failed: evidence.privateArtifactPaths.map((path) => ({
+        filename: basename(path),
+        reason: "write_failed",
+      })),
+      limitations: [
+        `Evidence publication failed (${errorCode(error)}): no artifacts were published`,
+      ],
+    };
+  }
+  const unpublishedArtifacts = published.failed.map((f) => f.filename);
+  const summary = applyEvidenceCompleteness(evidence.result.summary, {
+    unpublishedArtifacts,
+  });
+  const downgraded = summary.result !== evidence.result.summary.result;
   const result: RunnerResult = {
     ...evidence.result,
     artifacts: published.entries,
-    limitations: [...evidence.result.limitations, ...published.limitations],
+    limitations: [
+      ...evidence.result.limitations,
+      ...published.limitations,
+      ...(downgraded
+        ? [
+            `Summary is inconclusive: ${unpublishedArtifacts.length} declared evidence artifact(s) could not be published`,
+          ]
+        : []),
+    ],
+    summary,
   };
-  if (published.limitations.length > 0 && result.summary.result === "pass") {
-    result.summary = { ...result.summary, result: "inconclusive" };
-  }
-  return { privateArtifactPaths: evidence.privateArtifactPaths, result };
+  return {
+    privateArtifactPaths: evidence.privateArtifactPaths,
+    result,
+    unpublishedArtifacts,
+  };
 }
 
 /**
@@ -169,13 +206,7 @@ export async function startRunner(
   try {
     // Never start on top of a native group a previous runner left running.
     assertNoOrphanedNativeGroups(store.rootDir);
-    return await startOwnedRunner(
-      store,
-      catalogue,
-      host,
-      port,
-      options.processAdapter,
-    );
+    return await startOwnedRunner(store, catalogue, host, port, options);
   } catch (error) {
     // Only this instance's own lock is released.
     store.releaseRootLock();
@@ -188,9 +219,11 @@ async function startOwnedRunner(
   catalogue: ProfileCatalogue,
   host: string,
   port: number,
-  processAdapter: ProcessAdapter | undefined,
+  seams: Pick<RunnerMainOptions, "artifactSourceReader" | "processAdapter">,
 ): Promise<RunnerMain> {
-  const artifacts = new ArtifactStore(store.rootDir);
+  const artifacts = new ArtifactStore(store.rootDir, {
+    readSource: seams.artifactSourceReader,
+  });
 
   // Real executor: resolve the requested profile and dispatch to the native worker
   const execute: ExecuteFn = async (ctx) => {
@@ -198,7 +231,7 @@ async function startOwnedRunner(
 
     const nativeExecutor = createNativeExecutor({
       effectiveConfig,
-      processAdapter,
+      processAdapter: seams.processAdapter,
       request: ctx.request,
     });
 

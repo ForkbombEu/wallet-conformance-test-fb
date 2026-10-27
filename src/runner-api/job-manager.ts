@@ -25,7 +25,7 @@ import {
   type StoredRun,
 } from "./job-store";
 import { validateAndAdaptNativeExport } from "./native-result-adapter";
-import { summarizeResult } from "./summarize";
+import { type EvidenceCompleteness, summarizeResult } from "./summarize";
 import { settlesWithin } from "./timing";
 
 /** Why the manager aborted a live run. Set before aborting. */
@@ -50,6 +50,11 @@ export type ExecuteFn = (ctx: ExecuteContext) => Promise<ExecutionEvidence>;
 export interface ExecutionEvidence {
   privateArtifactPaths: string[];
   result: RunnerResult;
+  /**
+   * Declared artifacts whose initial publication failed (internal; never a
+   * wire field). Keeps the aggregate nonpass through lifecycle finalization.
+   */
+  unpublishedArtifacts?: readonly string[];
 }
 
 /** How long cancel/shutdown wait for an aborted worker before finalizing. */
@@ -369,7 +374,11 @@ export class JobManager {
           partialNative?: RunnerResult["native"];
           reason?: AbortReason;
         }
-      | { reason?: AbortReason; result: RunnerResult },
+      | {
+          reason?: AbortReason;
+          result: RunnerResult;
+          unpublishedArtifacts?: readonly string[];
+        },
   ): void {
     const current = this.store.getRun(run.runId);
     if (!current || isTerminalStatus(current.status)) {
@@ -393,6 +402,7 @@ export class JobManager {
           status,
           finishedAt,
           reason ? [ABORT_LIMITATION[reason]] : [],
+          { unpublishedArtifacts: outcome.unpublishedArtifacts },
         );
       } else {
         const issues = wire.error.issues
@@ -432,7 +442,11 @@ export class JobManager {
         runRoot: this.store.workDir(run.runId),
       });
       clearTimeout(deadlineTimer);
-      this.finalize(run, { reason: live.abortReason, result: evidence.result });
+      this.finalize(run, {
+        reason: live.abortReason,
+        result: evidence.result,
+        unpublishedArtifacts: evidence.unpublishedArtifacts,
+      });
     } catch (error) {
       clearTimeout(deadlineTimer);
       this.finalize(run, { error, reason: live.abortReason });
@@ -565,13 +579,15 @@ function readPartialNative(
 
 /**
  * Forces the lifecycle status onto a worker result and recomputes the
- * summary from the preserved native data (PASS + incomplete ⇒ partial).
+ * summary from the preserved native data (PASS + incomplete ⇒ partial) and
+ * the evidence completeness (unpublished evidence ⇒ never pass).
  */
 function withLifecycle(
   result: RunnerResult,
   status: RunStatus,
   finishedAt: string,
   limitations: string[],
+  evidence: EvidenceCompleteness,
 ): RunnerResult {
   const execution: RunnerResult["execution"] = {
     ...result.execution,
@@ -582,7 +598,7 @@ function withLifecycle(
     ...result,
     execution,
     limitations: [...result.limitations, ...limitations],
-    summary: summarizeResult(execution, result.native),
+    summary: summarizeResult(execution, result.native, evidence),
   };
 }
 

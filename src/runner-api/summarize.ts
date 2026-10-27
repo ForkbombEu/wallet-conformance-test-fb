@@ -1,8 +1,29 @@
 import type { RunnerResult } from "./contract";
 
+/** Aggregation inputs that are not native data (never wire fields). */
+export interface EvidenceCompleteness {
+  /** Declared evidence artifacts whose initial publication failed. */
+  unpublishedArtifacts?: readonly string[];
+}
 type Execution = RunnerResult["execution"];
 type Native = RunnerResult["native"];
+
 type Summary = RunnerResult["summary"];
+
+/**
+ * Applies evidence completeness to a native summary: a pass whose declared
+ * raw evidence could not be published is inconclusive. Native verdicts and
+ * nonpass results are left as they are.
+ */
+export function applyEvidenceCompleteness(
+  summary: Summary,
+  evidence: EvidenceCompleteness,
+): Summary {
+  const unpublished = evidence.unpublishedArtifacts?.length ?? 0;
+  return summary.result === "pass" && unpublished > 0
+    ? { ...summary, result: "inconclusive" }
+    : summary;
+}
 
 /**
  * Whether the native suite itself ended cleanly: status PASSED and, when the
@@ -18,7 +39,18 @@ export function nativeSuiteClean(
   );
 }
 
-export function summarizeResult(execution: Execution, native: Native): Summary {
+export function summarizeResult(
+  execution: Execution,
+  native: Native,
+  evidence: EvidenceCompleteness = {},
+): Summary {
+  return applyEvidenceCompleteness(
+    summarizeNative(execution, native),
+    evidence,
+  );
+}
+
+function summarizeNative(execution: Execution, native: Native): Summary {
   const assertionCount = native.assertions.length;
   const nativeFailedCount = native.assertions.filter(
     (a) => a.native_status === "FAIL",

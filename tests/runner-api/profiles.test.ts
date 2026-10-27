@@ -234,7 +234,13 @@ describe("assertBrowserDriverAvailable", () => {
 
   it("allows browser_redirect when driver is configured", () => {
     const profile = requireProfile("credimi-issuance-smoke");
-    const withDriver = { ...profile, browserDriver: { type: "test" } };
+    const withDriver = {
+      ...profile,
+      authorizationDriver: {
+        modulePath: "/test.mjs",
+        type: "puppeteer" as const,
+      },
+    };
     expect(() =>
       assertBrowserDriverAvailable(withDriver, "browser_redirect"),
     ).not.toThrow();

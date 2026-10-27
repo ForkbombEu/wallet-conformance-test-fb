@@ -154,10 +154,10 @@ export function assertBrowserDriverAvailable(
   profile: Profile,
   interaction: AuthorizationInteraction,
 ): void {
-  if (interaction === "browser_redirect" && !profile.browserDriver) {
+  if (interaction === "browser_redirect" && !profile.authorizationDriver) {
     throw new ProfileError(
       "UNSUPPORTED_AUTHORIZATION_INTERACTION",
-      `Profile '${profile.id}' requires browser_redirect but no browser driver is configured`,
+      `Profile '${profile.id}' requires browser_redirect but no authorization driver is configured`,
     );
   }
 }

@@ -5,6 +5,7 @@ import { ItWalletCredentialVerifierMetadata } from "@pagopa/io-wallet-oid-federa
 import { loadAttestation, loadCredentialsForPresentation } from "@/functions";
 import { createLogger, loadConfigWithHierarchy } from "@/logic";
 import { getAuthorizeRequestUrl } from "@/logic/authorization-request-url";
+import type { EngagementFactoryConfig } from "@/logic/engagement-factory";
 import {
   FetchMetadataVpDefaultStep,
   FetchMetadataVpStepResponse,
@@ -34,6 +35,7 @@ export class WalletPresentationOrchestratorFlow {
 
   private authorizationRequestStep: AuthorizationRequestDefaultStep;
   private config: Config;
+  private engagementFactory?: EngagementFactoryConfig;
   private fetchMetadataStep: FetchMetadataVpDefaultStep;
   private log = createLogger();
 
@@ -41,11 +43,15 @@ export class WalletPresentationOrchestratorFlow {
   private redirectUriStep: RedirectUriDefaultStep;
   private readonly TOTAL_STEPS = 3;
 
-  constructor(presentationConfig: PresentationTestConfiguration) {
+  constructor(
+    presentationConfig: PresentationTestConfiguration,
+    engagementFactory?: EngagementFactoryConfig,
+  ) {
     this.presentationConfig = presentationConfig;
     this.log = this.log.withTag(this.presentationConfig.name);
 
     this.config = loadConfigWithHierarchy();
+    this.engagementFactory = engagementFactory;
 
     this.log.setLogOptions({
       fileFormat: this.config.logging.log_file_format,
@@ -147,6 +153,7 @@ export class WalletPresentationOrchestratorFlow {
   async runThroughAuthorize(): Promise<RunThroughAuthorizeVpContext> {
     const authorizeRequestUrl = await getAuthorizeRequestUrl(
       this.config.presentation,
+      this.engagementFactory,
     );
 
     this.printTestSuiteOnce(authorizeRequestUrl);

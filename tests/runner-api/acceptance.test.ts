@@ -540,6 +540,6 @@ describe("Acceptance — browser flow with driver", () => {
       await import("@/runner-api/profiles");
     expect(() =>
       assertBrowserDriverAvailable(profile, "browser_redirect"),
-    ).toThrow(/no browser driver/);
+    ).toThrow(/no authorization driver/);
   });
 });

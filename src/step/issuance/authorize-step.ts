@@ -79,6 +79,12 @@ export interface AuthorizeStepOptions {
    * Wallet Attestation used to authenticate the client, it will be loaded from the configuration
    */
   walletAttestation: Omit<AttestationResponse, "created">;
+
+  /**
+   * Optional authorization driver for automated browser flows.
+   * When present, handlePidFlow uses it instead of opening the system browser.
+   */
+  driver?: AuthorizationDriver;
 }
 
 export type AuthorizeStepResponse = StepResponse & {
@@ -312,6 +318,7 @@ export class AuthorizeDefaultStep extends StepFlow {
         return this.handlePidFlow({
           authorizeUrl,
           callbackPort,
+          driver: options.driver,
           redirectUri,
         });
       }

@@ -75,18 +75,33 @@ export function createNativeExecutor(
     const { effectiveConfig, request } = options;
 
     const resultsDir = join(runRoot, "results");
-    const dbPath = join(runRoot, "data", "wct.db");
+    const dataDir = join(runRoot, "data");
+    const dbPath = join(dataDir, "wct.db");
 
-    // Build env
+    // Build env with per-run isolation and effective config
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       NODE_OPTIONS: getNodeOptionsWithExperimentalWarningDisabled(
         process.env.NODE_OPTIONS,
       ),
+      CONFIG_FILE_INI: effectiveConfig.profileConfigPath,
+      CONFIG_ISSUANCE_TESTS_DIR: join(runRoot, "tests"),
       WCT_DB_PATH: dbPath,
       WCT_RESULTS_DIR: resultsDir,
       WCT_RUN_ID: runId,
     };
+
+    // Apply typed overrides to child env
+    if (request.parameters?.issuer_url) {
+      env.CONFIG_CREDENTIAL_ISSUER_URI = request.parameters.issuer_url;
+    }
+    if (request.parameters?.credential_offer_uri) {
+      env.CONFIG_CREDENTIAL_OFFER_URI = request.parameters.credential_offer_uri;
+    }
+    if (request.parameters?.authorization_interaction) {
+      env.CONFIG_AUTHORIZATION_INTERACTION =
+        request.parameters.authorization_interaction;
+    }
 
     // Determine config file and test target
     const category = effectiveConfig.category;

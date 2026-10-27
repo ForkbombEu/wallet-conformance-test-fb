@@ -20,6 +20,7 @@ export interface EffectiveConfig {
   category: Profile["category"];
   coverageMode: Profile["coverageMode"];
   overrides: RunOverrides;
+  profileConfigPath: string;
   profileId: string;
   selectionId: string;
   target: {
@@ -83,6 +84,7 @@ export function buildEffectiveConfig(
     category: profile.category,
     coverageMode: profile.coverageMode,
     overrides,
+    profileConfigPath: profile.configFile,
     profileId: profile.id,
     selectionId,
     target: {

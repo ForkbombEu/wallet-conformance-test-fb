@@ -9,6 +9,7 @@ import { IoWalletSdkConfig } from "@pagopa/io-wallet-utils";
 import { randomUUID } from "node:crypto";
 
 import { loadAttestation, loadCredentialsForPresentation } from "@/functions";
+import type { AuthorizationDriver } from "@/logic/authorization-driver";
 import {
   createLogger,
   loadConfigWithHierarchy,
@@ -74,6 +75,7 @@ export class WalletIssuanceOrchestratorFlow {
 
   private authorizeStep: AuthorizeDefaultStep;
   private config: Config;
+  private driver?: AuthorizationDriver;
   private credentialRequestStep: CredentialRequestDefaultStep;
   private deferredCredentialRequestStep: DeferredCredentialRequestDefaultStep;
   private fetchMetadataStep: FetchMetadataDefaultStep;
@@ -88,8 +90,12 @@ export class WalletIssuanceOrchestratorFlow {
   private tokenRequestStep: TokenRequestDefaultStep;
   private readonly TOTAL_STEPS = 6;
 
-  constructor(issuanceConfig: IssuerTestConfiguration) {
+  constructor(
+    issuanceConfig: IssuerTestConfiguration,
+    driver?: AuthorizationDriver,
+  ) {
     this.issuanceConfig = issuanceConfig;
+    this.driver = driver;
     this.log = this.log.withTag(this.issuanceConfig.name);
 
     this.config = loadConfigWithHierarchy();
@@ -456,6 +462,7 @@ export class WalletIssuanceOrchestratorFlow {
       clientId: walletAttestationResponse.unitKey.publicKey.kid,
       credentialIdentifier: this.issuanceConfig.credentialConfigurationId,
       credentials,
+      driver: this.driver,
       requestUri: pushedAuthorizationRequestResponse.response?.request_uri,
       rpMetadata: entityStatementClaims?.metadata?.openid_credential_verifier,
       walletAttestation: walletAttestationResponse,

@@ -18,7 +18,12 @@ import type { ExecuteFn } from "@/runner-api/job-manager";
 import { ArtifactStore } from "@/runner-api/artifacts";
 import { JobManager } from "@/runner-api/job-manager";
 import { JobStore } from "@/runner-api/job-store";
-import { getProfile, profileCatalogue } from "@/runner-api/profiles";
+import {
+  defaultProfileCatalogue,
+  getProfile,
+  profileCatalogue,
+  selectProfileForRequest,
+} from "@/runner-api/profiles";
 import { createRunnerApp } from "@/runner-api/server";
 
 const TOKEN = "acceptance-test-token";
@@ -192,7 +197,14 @@ async function startTestServer(executeFn: ExecuteFn): Promise<void> {
   store = new JobStore(dir);
   artifacts = new ArtifactStore();
   jobManager = new JobManager({ execute: executeFn, store });
-  const app = createRunnerApp({ artifacts, jobManager });
+  const app = createRunnerApp({
+    artifacts,
+    catalogue: defaultProfileCatalogue,
+    jobManager,
+    validateRun: (request) => {
+      selectProfileForRequest(defaultProfileCatalogue, request);
+    },
+  });
 
   const { createServer: createHttpServer } = await import("node:http");
   const server = createHttpServer(app);

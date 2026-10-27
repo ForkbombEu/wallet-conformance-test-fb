@@ -87,6 +87,27 @@ export function resolvePathFrom(baseDir: string, relativePath: string): string {
   return path.resolve(baseDir, relativePath);
 }
 
+/**
+ * Resolves a package-relative selection spec (for example
+ * `tests/credimi/issuance/credimi-flow.issuance.spec.ts`) to the test file
+ * that native Vitest discovery will actually load.
+ *
+ * Mirrors vitest.common.js: source tests are used when `<packageRoot>/tests`
+ * exists, otherwise the emitted `dist/tests/**.js` counterpart is used.
+ */
+export function resolveSelectionTestFile(
+  testFile: string,
+  rootDir = packageRoot,
+): string {
+  if (path.isAbsolute(testFile)) {
+    return testFile;
+  }
+  if (existsSync(path.join(rootDir, "tests"))) {
+    return path.resolve(rootDir, testFile);
+  }
+  return path.resolve(rootDir, "dist", testFile.replace(/\.ts$/, ".js"));
+}
+
 export function resolveWorkspacePath(relativePath: string): string {
   if (path.isAbsolute(relativePath)) {
     return relativePath;

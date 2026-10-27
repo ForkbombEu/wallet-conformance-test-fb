@@ -3,14 +3,41 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { RunRequest } from "../../src/runner-api/contract";
 import type {
   ProcessAdapter,
-  SpawnOptions,
   SpawnedProcess,
+  SpawnOptions,
 } from "../../src/runner-api/native-worker";
-import { createNativeExecutor } from "../../src/runner-api/native-worker";
 import type { Profile } from "../../src/runner-api/profiles";
-import type { RunRequest } from "../../src/runner-api/contract";
+
+import { createNativeExecutor } from "../../src/runner-api/native-worker";
+
+function makeFakeAdapter(exitCode = 0) {
+  const spawns: { args: string[]; command: string; options: SpawnOptions }[] =
+    [];
+  const adapter: ProcessAdapter = {
+    spawn(command, args, opts) {
+      spawns.push({ args, command, options: opts });
+      const listeners: Record<string, ((...a: unknown[]) => void)[]> = {
+        error: [],
+        exit: [],
+      };
+      const handle: SpawnedProcess = {
+        kill: () => true,
+        on(event, listener) {
+          listeners[event]?.push(listener as (...a: unknown[]) => void);
+        },
+        pid: 12345,
+      };
+      setTimeout(() => {
+        for (const fn of listeners.exit ?? []) fn(exitCode);
+      }, 10);
+      return handle;
+    },
+  };
+  return { adapter, spawns };
+}
 
 function makeProfile(): Profile {
   return {
@@ -45,32 +72,6 @@ function makeRequest(): RunRequest {
     },
     timeout_ms: 600_000,
   };
-}
-
-function makeFakeAdapter(exitCode = 0) {
-  const spawns: { args: string[]; command: string; options: SpawnOptions }[] =
-    [];
-  const adapter: ProcessAdapter = {
-    spawn(command, args, opts) {
-      spawns.push({ args, command, options: opts });
-      const listeners: Record<string, ((...a: unknown[]) => void)[]> = {
-        error: [],
-        exit: [],
-      };
-      const handle: SpawnedProcess = {
-        kill: () => true,
-        on(event, listener) {
-          listeners[event]?.push(listener as (...a: unknown[]) => void);
-        },
-        pid: 12345,
-      };
-      setTimeout(() => {
-        for (const fn of listeners.exit ?? []) fn(exitCode);
-      }, 10);
-      return handle;
-    },
-  };
-  return { adapter, spawns };
 }
 
 let dir: string;
@@ -170,8 +171,10 @@ describe("L09 — native child config discovery", () => {
 
 function makeEffectiveConfig() {
   return {
+    authorizationInteraction: "auto" as const,
     category: "issuance" as const,
     coverageMode: "interoperability" as const,
+    credentialConfigurationIds: ["dc_sd_jwt_PersonIdentificationData"],
     overrides: {},
     profileConfigPath: "/abs/config.ini",
     profileId: "test-profile",

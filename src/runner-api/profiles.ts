@@ -1,6 +1,11 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 
 import { engagementFactoryConfigSchema } from "@/logic/engagement-factory";
+import { resolveSelectionTestFile } from "@/logic/runtime-paths";
+
+import type { RunRequest } from "./contract";
 
 // ---------------------------------------------------------------------------
 // Selection entries
@@ -49,7 +54,7 @@ export type AuthorizationDriverConfig = z.infer<
   typeof authorizationDriverConfigSchema
 >;
 
-const profileSchema = z
+export const profileSchema = z
   .object({
     allowedAuthorizationInteraction: z
       .array(authorizationInteractionSchema)
@@ -128,6 +133,11 @@ export const profileCatalogue: readonly Profile[] = [
 // Lookups and validation
 // ---------------------------------------------------------------------------
 
+export interface ProfileCatalogue {
+  get(id: string): Profile | undefined;
+  readonly profiles: readonly Profile[];
+}
+
 export class ProfileError extends Error {
   readonly code: string;
 
@@ -176,15 +186,135 @@ export function assertSelectionMatchesCategory(
   return selection;
 }
 
+// ---------------------------------------------------------------------------
+// Operator-supplied catalogue (startup path)
+// ---------------------------------------------------------------------------
+
 export function getProfile(id: string): Profile | undefined {
   return profileCatalogue.find((p) => p.id === id);
 }
+
+const profilesFileSchema = z
+  .object({
+    profiles: z.array(profileSchema).min(1, "contains no profiles"),
+  })
+  .strict();
+
+/**
+ * Builds a catalogue from already validated profiles, rejecting duplicate IDs.
+ */
+export function createProfileCatalogue(
+  profiles: readonly Profile[],
+): ProfileCatalogue {
+  const byId = new Map<string, Profile>();
+  for (const profile of profiles) {
+    if (byId.has(profile.id)) {
+      throw new ProfileError(
+        "INVALID_PROFILES",
+        `Duplicate profile id: ${profile.id}`,
+      );
+    }
+    byId.set(profile.id, profile);
+  }
+  return {
+    get: (id) => byId.get(id),
+    profiles: [...profiles],
+  };
+}
+
+/**
+ * Checks a request against the catalogue without loading any INI: known
+ * profile, matching category, exactly one defined selection and valid typed
+ * overrides.
+ */
+export function selectProfileForRequest(
+  catalogue: ProfileCatalogue,
+  request: Pick<
+    RunRequest,
+    "category" | "parameters" | "profile_id" | "selection"
+  >,
+): { overrides: RunOverrides; profile: Profile; selectionId: string } {
+  const profile = catalogue.get(request.profile_id);
+  if (!profile) {
+    throw new ProfileError(
+      "UNKNOWN_PROFILE",
+      `Unknown profile '${request.profile_id}'`,
+    );
+  }
+  if (profile.category !== request.category) {
+    throw new ProfileError(
+      "CATEGORY_MISMATCH",
+      `Profile '${profile.id}' has category '${profile.category}', request asked for '${request.category}'`,
+    );
+  }
+  const [selectionId, ...extra] = request.selection.ids;
+  if (!selectionId || extra.length > 0) {
+    throw new ProfileError(
+      "UNSUPPORTED_SELECTION",
+      "This runner executes exactly one selection per run",
+    );
+  }
+  assertSelectionMatchesCategory(profile, selectionId);
+  const overrides = validateRunOverrides(request.parameters ?? {});
+  return { overrides, profile, selectionId };
+}
+
+/** The built-in catalogue, used only by explicit fallback callers. */
+export const defaultProfileCatalogue: ProfileCatalogue =
+  createProfileCatalogue(profileCatalogue);
 
 export function getSelection(
   profile: Profile,
   selectionId: string,
 ): SelectionEntry | undefined {
   return profile.selections.find((s) => s.id === selectionId);
+}
+
+/**
+ * Loads and validates the operator profiles JSON.
+ *
+ * Every profile is validated against the full schema (unknown fields fail).
+ * Operator paths (configFile, authorizationDriver.modulePath,
+ * initializedAssets) resolve against the profiles JSON directory; selection
+ * test files resolve against the package's test distribution root. All
+ * returned paths are absolute and must exist.
+ */
+export function loadProfileCatalogue(profilesPath: string): ProfileCatalogue {
+  const absPath = resolve(profilesPath);
+  if (!existsSync(absPath)) {
+    throw new ProfileError(
+      "INVALID_PROFILES",
+      `Profiles file not found: ${absPath}`,
+    );
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(absPath, "utf-8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ProfileError(
+      "INVALID_PROFILES",
+      `Profiles file is not valid JSON: ${message}`,
+    );
+  }
+
+  const parsed = profilesFileSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("; ");
+    throw new ProfileError(
+      "INVALID_PROFILES",
+      `Invalid profiles file: ${issues}`,
+    );
+  }
+
+  const baseDir = dirname(absPath);
+  const resolved = parsed.data.profiles.map((profile) =>
+    resolveProfilePaths(profile, baseDir),
+  );
+  return createProfileCatalogue(resolved);
 }
 
 export function validateRunOverrides(raw: unknown): RunOverrides {
@@ -196,4 +326,55 @@ export function validateRunOverrides(raw: unknown): RunOverrides {
     throw new ProfileError("INVALID_OVERRIDE", `Invalid override: ${issues}`);
   }
   return result.data;
+}
+
+function requireExisting(path: string, what: string, profileId: string) {
+  if (!existsSync(path)) {
+    throw new ProfileError(
+      "INVALID_PROFILES",
+      `Profile '${profileId}' ${what} not found: ${path}`,
+    );
+  }
+  return path;
+}
+
+function resolveProfilePaths(profile: Profile, baseDir: string): Profile {
+  const fromBase = (p: string) => (isAbsolute(p) ? p : resolve(baseDir, p));
+  const categorySuffix = `.${profile.category}.spec.`;
+
+  return {
+    ...profile,
+    authorizationDriver: profile.authorizationDriver && {
+      ...profile.authorizationDriver,
+      modulePath: requireExisting(
+        fromBase(profile.authorizationDriver.modulePath),
+        "authorization driver module",
+        profile.id,
+      ),
+    },
+    configFile: requireExisting(
+      fromBase(profile.configFile),
+      "config",
+      profile.id,
+    ),
+    initializedAssets: profile.initializedAssets?.map((asset) =>
+      requireExisting(fromBase(asset), "initialized asset", profile.id),
+    ),
+    selections: profile.selections.map((selection) => {
+      if (!selection.testFile.includes(categorySuffix)) {
+        throw new ProfileError(
+          "INVALID_PROFILES",
+          `Profile '${profile.id}' selection '${selection.id}' is not a ${profile.category} spec: ${selection.testFile}`,
+        );
+      }
+      return {
+        ...selection,
+        testFile: requireExisting(
+          resolveSelectionTestFile(selection.testFile),
+          `selection '${selection.id}' test file`,
+          profile.id,
+        ),
+      };
+    }),
+  };
 }

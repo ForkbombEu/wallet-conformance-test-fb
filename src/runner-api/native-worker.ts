@@ -86,11 +86,11 @@ export function createNativeExecutor(
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      CONFIG_FILE_INI: effectiveConfig.profileConfigPath,
+      CONFIG_ISSUANCE_TESTS_DIR: testDir,
       NODE_OPTIONS: getNodeOptionsWithExperimentalWarningDisabled(
         process.env.NODE_OPTIONS,
       ),
-      CONFIG_FILE_INI: effectiveConfig.profileConfigPath,
-      CONFIG_ISSUANCE_TESTS_DIR: testDir,
       WCT_DB_PATH: dbPath,
       WCT_RESULTS_DIR: resultsDir,
       WCT_RUN_ID: runId,

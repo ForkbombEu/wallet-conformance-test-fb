@@ -10,11 +10,19 @@ import type { JobManager } from "./job-manager";
 
 import { ArtifactStore, isSafeArtifactId } from "./artifacts";
 import { invalidRequest, RunnerError, runRequestSchema } from "./contract";
-import { getProfile, profileCatalogue, validateRunOverrides } from "./profiles";
+import { type ProfileCatalogue, ProfileError } from "./profiles";
 
 export interface RunnerDependencies {
   artifacts: ArtifactStore;
+  /** The startup-loaded catalogue used for capabilities and validation. */
+  catalogue: ProfileCatalogue;
   jobManager: JobManager;
+  /**
+   * Rejects a request that the selected profile cannot run (unknown profile,
+   * category/selection mismatch, invalid overrides, issuer identity). Throws
+   * ProfileError; runs before the job is accepted.
+   */
+  validateRun: (request: RunRequest) => void;
 }
 
 const JSON_LIMIT = "64kb";
@@ -71,14 +79,14 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
         version: "1.2.1",
       },
       max_timeout_ms: 3_600_000,
-      profiles: profileCatalogue.map((p) => ({
+      profiles: deps.catalogue.profiles.map((p) => ({
         allowed_authorization_interaction: p.allowedAuthorizationInteraction,
         category: p.category,
         coverage_mode: p.coverageMode,
         id: p.id,
         selections: p.selections.map((s) => ({ id: s.id })),
       })),
-      selection_catalogue: profileCatalogue.flatMap((p) =>
+      selection_catalogue: deps.catalogue.profiles.flatMap((p) =>
         p.selections.map((s) => ({ profile_id: p.id, selection_id: s.id })),
       ),
     });
@@ -105,26 +113,13 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
 
         const request: RunRequest = parsed.data;
 
-        // Validate profile exists
-        const profile = getProfile(request.profile_id);
-        if (!profile) {
-          throw invalidRequest(`Unknown profile '${request.profile_id}'`);
-        }
-
-        // Validate selection
-        const selectionId = request.selection.ids[0];
-        if (
-          !selectionId ||
-          !profile.selections.some((s) => s.id === selectionId)
-        ) {
-          throw invalidRequest(
-            `Selection '${selectionId}' is not defined in profile '${request.profile_id}'`,
-          );
-        }
-
-        // Validate overrides
-        if (request.parameters && Object.keys(request.parameters).length > 0) {
-          validateRunOverrides(request.parameters);
+        try {
+          deps.validateRun(request);
+        } catch (error) {
+          if (error instanceof ProfileError) {
+            throw new RunnerError(error.code, 400, error.message);
+          }
+          throw error;
         }
 
         const { replayed, snapshot } = await deps.jobManager.submit(

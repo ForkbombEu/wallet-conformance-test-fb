@@ -9,31 +9,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { RunRequest, RunnerResult } from "../../src/runner-api/contract";
-import { JobManager, type ExecuteFn } from "../../src/runner-api/job-manager";
-import { JobStore } from "../../src/runner-api/job-store";
+import {
+  defaultProfileCatalogue,
+  selectProfileForRequest,
+} from "@/runner-api/profiles";
+
+import type { RunnerResult, RunRequest } from "../../src/runner-api/contract";
+
 import { ArtifactStore } from "../../src/runner-api/artifacts";
-import { createRunnerApp } from "../../src/runner-api/server";
+import { type ExecuteFn, JobManager } from "../../src/runner-api/job-manager";
+import { JobStore } from "../../src/runner-api/job-store";
 import { validateAndAdaptNativeExport } from "../../src/runner-api/native-result-adapter";
+import { createRunnerApp } from "../../src/runner-api/server";
 import { summarizeResult } from "../../src/runner-api/summarize";
 
 const TOKEN = "composition-token";
-
-function makeRequest(): RunRequest {
-  return {
-    category: "issuance",
-    contract_version: "1.0",
-    parameters: {},
-    profile_id: "credimi-issuance-smoke",
-    selection: { ids: ["credimi-issuance-smoke"] },
-    target: {
-      actor_name: "test",
-      actor_type: "issuer",
-      issuer_identifier: "https://issuer.example",
-    },
-    timeout_ms: 600_000,
-  };
-}
 
 // Real producer export format (camelCase from native-export.ts)
 function makeProducerExport(overrides: Record<string, unknown> = {}) {
@@ -59,6 +49,22 @@ function makeProducerExport(overrides: Record<string, unknown> = {}) {
     startedAt: "2026-01-01T00:00:00Z",
     status: "FAILED",
     ...overrides,
+  };
+}
+
+function makeRequest(): RunRequest {
+  return {
+    category: "issuance",
+    contract_version: "1.0",
+    parameters: {},
+    profile_id: "credimi-issuance-smoke",
+    selection: { ids: ["credimi-issuance-smoke"] },
+    target: {
+      actor_name: "test",
+      actor_type: "issuer",
+      issuer_identifier: "https://issuer.example",
+    },
+    timeout_ms: 600_000,
   };
 }
 
@@ -241,7 +247,14 @@ describe("Real composition — producer → adapter → summarizer → API", () 
       store,
     });
 
-    const app = createRunnerApp({ artifacts, jobManager });
+    const app = createRunnerApp({
+      artifacts,
+      catalogue: defaultProfileCatalogue,
+      jobManager,
+      validateRun: (request) => {
+        selectProfileForRequest(defaultProfileCatalogue, request);
+      },
+    });
 
     // Start real HTTP server
     const { createServer } = await import("node:http");

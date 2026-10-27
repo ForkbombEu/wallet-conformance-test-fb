@@ -1,5 +1,6 @@
 import type { Config } from "@/types";
 
+import { loadConfigWithHierarchy } from "@/logic/config-loader";
 import { resolveWorkspacePath } from "@/logic/runtime-paths";
 
 import {
@@ -17,8 +18,11 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface EffectiveConfig {
+  authorizationInteraction: AuthorizationInteraction;
   category: Profile["category"];
   coverageMode: Profile["coverageMode"];
+  /** issuance.credential_types after applying credential_configuration_ids. */
+  credentialConfigurationIds: string[];
   overrides: RunOverrides;
   profileConfigPath: string;
   profileId: string;
@@ -80,9 +84,15 @@ export function buildEffectiveConfig(
   // Fresh per-run writable paths under the workspace
   const ws = resolveWorkspacePath(workspaceDir);
 
+  const credentialConfigurationIds =
+    overrides.credential_configuration_ids ??
+    baseConfig.issuance.credential_types;
+
   return {
+    authorizationInteraction: effectiveInteraction,
     category: profile.category,
     coverageMode: profile.coverageMode,
+    credentialConfigurationIds,
     overrides,
     profileConfigPath: profile.configFile,
     profileId: profile.id,
@@ -98,4 +108,24 @@ export function buildEffectiveConfig(
       logs: `${ws}/data/logs`,
     },
   };
+}
+
+/**
+ * Loads an operator INI through the native hierarchical loader without
+ * leaking its process-wide side effects into the long-lived runner process.
+ *
+ * The native loader sets NODE_TLS_REJECT_UNAUTHORIZED=0 when the INI disables
+ * TLS verification; that relaxation belongs to the native child only.
+ */
+export function loadOperatorConfig(configFile: string): Config {
+  const tlsBefore = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  try {
+    return loadConfigWithHierarchy({ fileIni: configFile });
+  } finally {
+    if (tlsBefore === undefined) {
+      Reflect.deleteProperty(process.env, "NODE_TLS_REJECT_UNAUTHORIZED");
+    } else {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = tlsBefore;
+    }
+  }
 }

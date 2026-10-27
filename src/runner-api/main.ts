@@ -1,16 +1,26 @@
 import type { Express } from "express";
 
 import { createServer, type Server } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+
+import type { RunRequest } from "./contract";
 
 import { ArtifactStore } from "./artifacts";
-import { JobManager, type ExecuteFn } from "./job-manager";
+import {
+  buildEffectiveConfig,
+  type EffectiveConfig,
+  loadOperatorConfig,
+} from "./effective-config";
+import { type ExecuteFn, JobManager } from "./job-manager";
 import { JobStore } from "./job-store";
-import { createRunnerApp } from "./server";
-import { getProfile, type Profile } from "./profiles";
-import { buildEffectiveConfig } from "./effective-config";
 import { createNativeExecutor } from "./native-worker";
+import {
+  loadProfileCatalogue,
+  type Profile,
+  type ProfileCatalogue,
+  ProfileError,
+  selectProfileForRequest,
+} from "./profiles";
+import { createRunnerApp } from "./server";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8789;
@@ -29,63 +39,46 @@ export interface RunnerMainOptions {
   runRoot: string;
 }
 
+/**
+ * Loads the operator profiles JSON. Kept for callers that only need the
+ * validated list; startup uses {@link loadProfileCatalogue} directly.
+ */
 export function loadProfiles(profilesPath: string): Profile[] {
-  const absPath = resolve(profilesPath);
-  if (!existsSync(absPath)) {
-    throw new Error(`Profiles file not found: ${absPath}`);
-  }
-  const raw = JSON.parse(readFileSync(absPath, "utf-8")) as {
-    profiles?: unknown[];
-  };
-  const profilesRaw = raw.profiles ?? [];
-  if (profilesRaw.length === 0) {
-    throw new Error("Profiles file contains no profiles");
-  }
+  return [...loadProfileCatalogue(profilesPath).profiles];
+}
 
-  // Validate each profile and resolve paths against the profiles JSON directory
-  const profilesDir = resolve(absPath, "..");
-  const profiles: Profile[] = [];
-  const seenIds = new Set<string>();
+/**
+ * Resolves a run request against the startup-loaded catalogue and the
+ * selected profile's real INI. Used both to validate a request before it is
+ * accepted and to build the executor's effective configuration.
+ */
+export function resolveRun(
+  catalogue: ProfileCatalogue,
+  request: RunRequest,
+  workspaceDir: string,
+): EffectiveConfig {
+  const { overrides, profile, selectionId } = selectProfileForRequest(
+    catalogue,
+    request,
+  );
+  const config = loadOperatorConfig(profile.configFile);
+  const effective = buildEffectiveConfig(
+    profile,
+    selectionId,
+    overrides,
+    config,
+    workspaceDir,
+  );
 
-  for (const raw of profilesRaw) {
-    const p = raw as Record<string, unknown>;
-    const id = String(p.id ?? "");
-    if (!id) throw new Error("Profile missing id");
-    if (seenIds.has(id)) throw new Error(`Duplicate profile id: ${id}`);
-    seenIds.add(id);
-
-    // Resolve configFile against profiles JSON directory
-    const configFile = String(p.configFile ?? "");
-    if (!configFile) throw new Error(`Profile '${id}' missing configFile`);
-    const resolvedConfigFile = resolve(profilesDir, configFile);
-    if (!existsSync(resolvedConfigFile)) {
-      throw new Error(
-        `Profile '${id}' config not found: ${resolvedConfigFile}`,
-      );
-    }
-
-    // Validate selections exist and are nonempty
-    const selections = (p.selections ?? []) as Array<{
-      id?: string;
-      testFile?: string;
-    }>;
-    if (selections.length === 0)
-      throw new Error(`Profile '${id}' has no selections`);
-    for (const sel of selections) {
-      if (!sel.id || !sel.testFile) {
-        throw new Error(`Profile '${id}' selection missing id or testFile`);
-      }
-    }
-
-    profiles.push({
-      ...p,
-      configFile: resolvedConfigFile,
-      id,
-      selections,
-    } as Profile);
+  const advertised = request.target.issuer_identifier;
+  if (advertised && advertised !== effective.target.issuerIdentifier) {
+    throw new ProfileError(
+      "ISSUER_IDENTITY_MISMATCH",
+      `Target issuer '${advertised}' does not match the effective issuer '${effective.target.issuerIdentifier}'`,
+    );
   }
 
-  return profiles;
+  return effective;
 }
 
 export async function startRunner(
@@ -100,32 +93,14 @@ export async function startRunner(
   const port = options.port ?? DEFAULT_PORT;
 
   // Load and validate profiles before listening
-  const profiles = loadProfiles(options.profiles);
+  const catalogue = loadProfileCatalogue(options.profiles);
 
   const store = new JobStore(options.runRoot);
   const artifacts = new ArtifactStore();
 
-  // Build real executor that dispatches to native worker
+  // Real executor: resolve the requested profile and dispatch to the native worker
   const execute: ExecuteFn = async (ctx) => {
-    // Find the requested profile
-    const profile = profiles.find((p) => p.id === ctx.request.profile_id);
-    if (!profile) {
-      throw new Error(`Unknown profile: ${ctx.request.profile_id}`);
-    }
-
-    // Load the actual INI config
-    const { loadConfigWithHierarchy } = await import("@/logic/config-loader");
-    const config = loadConfigWithHierarchy({
-      fileIni: profile.configFile,
-    });
-
-    const effectiveConfig = buildEffectiveConfig(
-      profile,
-      ctx.request.selection.ids[0] ?? "",
-      ctx.request.parameters ?? {},
-      config,
-      ctx.runRoot,
-    );
+    const effectiveConfig = resolveRun(catalogue, ctx.request, ctx.runRoot);
 
     const nativeExecutor = createNativeExecutor({
       effectiveConfig,
@@ -150,16 +125,26 @@ export async function startRunner(
   };
 
   const jobManager = new JobManager({ execute, store });
-  const app = createRunnerApp({ artifacts, jobManager });
+  const app = createRunnerApp({
+    artifacts,
+    catalogue,
+    jobManager,
+    validateRun: (request) => {
+      resolveRun(catalogue, request, store.rootDir);
+    },
+  });
 
   const server = createServer(app);
 
   await new Promise<void>((resolve, reject) => {
-    server.listen(port, host, () => resolve());
     server.once("error", reject);
+    server.listen(port, host, () => resolve());
   });
 
-  const url = `http://${host}:${port}`;
+  const address = server.address();
+  const boundPort =
+    address && typeof address === "object" ? address.port : port;
+  const url = `http://${host}:${boundPort}`;
 
   const close = async (): Promise<void> => {
     await jobManager.shutdown();

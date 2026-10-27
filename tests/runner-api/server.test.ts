@@ -9,6 +9,10 @@ import type { ExecuteFn } from "@/runner-api/job-manager";
 import { ArtifactStore } from "@/runner-api/artifacts";
 import { JobManager } from "@/runner-api/job-manager";
 import { JobStore } from "@/runner-api/job-store";
+import {
+  defaultProfileCatalogue,
+  selectProfileForRequest,
+} from "@/runner-api/profiles";
 import { createRunnerApp } from "@/runner-api/server";
 
 const TOKEN = "test-token-12345";
@@ -87,7 +91,14 @@ async function startTestServer(
   store = new JobStore(dir);
   artifacts = new ArtifactStore();
   jobManager = new JobManager({ execute: executeFn, store });
-  const app = createRunnerApp({ artifacts, jobManager });
+  const app = createRunnerApp({
+    artifacts,
+    catalogue: defaultProfileCatalogue,
+    jobManager,
+    validateRun: (request) => {
+      selectProfileForRequest(defaultProfileCatalogue, request);
+    },
+  });
 
   const { createServer } = await import("node:http");
   const server = createServer(app);

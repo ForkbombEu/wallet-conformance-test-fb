@@ -23,7 +23,8 @@
     "vitest.presentation.config.js"
   ],
   "bin": {
-    "wct": "bin/wct"
+    "wct": "bin/wct",
+    "wct-runner": "bin/wct-runner"
   },
   "scripts": {
     "build": "node scripts/build.ts --production",

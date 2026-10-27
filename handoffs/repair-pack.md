@@ -14,7 +14,7 @@ Per-task handoffs live in `/home/bario/pagopa-followup-20261027/handoffs/`.
 | L11 lifecycle truth | DONE | abort reasons, single-write finalization, shutdown gate |
 | L12 recovery/ownership | DONE | owner-token lock, hash migration, quarantine, restart recovery |
 | L13 persistent evidence | DONE | durable run-scoped manifests, wire validation at publication |
-| L14 built distribution | NOT RUN | |
+| L14 built distribution | DONE | dist/runner-api/main.js + wct-runner bin; smoke shipped; build revision; bundled isMainModule fix |
 | L15 production proof | NOT RUN | |
 | Live SUT | NOT RUN | no operator SUT supplied |
 

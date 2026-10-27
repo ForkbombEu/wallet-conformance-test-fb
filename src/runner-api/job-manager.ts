@@ -1,8 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { readPackageVersion } from "@/logic/runtime-paths";
-
 import type {
   RunnerResult,
   RunRequest,
@@ -19,6 +17,7 @@ import {
   RunnerError,
   runnerResultSchema,
 } from "./contract";
+import { engineIdentity, engineLimitations } from "./engine";
 import {
   type CorruptRecord,
   generateRunId,
@@ -464,21 +463,14 @@ function buildErrorResult(
     artifacts: [],
     category: run.request.category,
     contract_version: "1.0",
-    engine: {
-      fork_repository:
-        "https://github.com/ForkbombEu/wallet-conformance-test-fb",
-      id: "pagopa-wct",
-      revision: "unknown",
-      upstream_repository: "https://github.com/pagopa/wallet-conformance-test",
-      version: readPackageVersion(),
-    },
+    engine: engineIdentity(),
     execution,
     limitations: [
       reason ? ABORT_LIMITATION[reason] : `Execution error: ${message}`,
       partialNative
         ? "Only partial native assertions exported before the interruption are included"
         : "No native result was collected",
-      "engine.revision is unknown: no trusted build revision is available",
+      ...engineLimitations(),
     ],
     native,
     profile_id: run.request.profile_id,

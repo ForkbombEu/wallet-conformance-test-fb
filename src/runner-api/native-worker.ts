@@ -11,7 +11,6 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
-import { readPackageVersion } from "@/logic/runtime-paths";
 import {
   getNodeOptionsWithExperimentalWarningDisabled,
   resolveVitestBin,
@@ -26,6 +25,7 @@ import type {
   ExecutionEvidence,
 } from "./job-manager";
 
+import { engineIdentity, engineLimitations } from "./engine";
 import { validateAndAdaptNativeExport } from "./native-result-adapter";
 import { materializeRunIni } from "./run-ini";
 import { summarizeResult } from "./summarize";
@@ -81,12 +81,6 @@ export interface NativeExecutorOptions {
   processAdapter?: ProcessAdapter;
   request: RunRequest;
 }
-
-const ENGINE_INFO = {
-  fork_repository: "https://github.com/ForkbombEu/wallet-conformance-test-fb",
-  id: "pagopa-wct",
-  upstream_repository: "https://github.com/pagopa/wallet-conformance-test",
-};
 
 interface DrainedStream {
   done: Promise<void>;
@@ -294,13 +288,9 @@ export function createNativeExecutor(
         artifacts: [],
         category,
         contract_version: "1.0",
-        engine: {
-          ...ENGINE_INFO,
-          revision: "unknown",
-          version: readPackageVersion(),
-        },
+        engine: engineIdentity(),
         execution,
-        limitations: [],
+        limitations: engineLimitations(),
         native,
         profile_id: effectiveConfig.profileId,
         run_id: runId,
@@ -326,11 +316,7 @@ function buildErrorResult(
     artifacts: [],
     category: effectiveConfig.category,
     contract_version: "1.0",
-    engine: {
-      ...ENGINE_INFO,
-      revision: "unknown",
-      version: readPackageVersion(),
-    },
+    engine: engineIdentity(),
     execution: {
       error: truncate(stderr, ERROR_TAIL_BYTES) || problem,
       exit_code: exitCode ?? undefined,
@@ -338,7 +324,10 @@ function buildErrorResult(
       started_at: startedAt,
       status: "error",
     },
-    limitations: [`Native execution produced no readable result: ${problem}`],
+    limitations: [
+      `Native execution produced no readable result: ${problem}`,
+      ...engineLimitations(),
+    ],
     native: {
       assertions: [],
       coverage_mode: effectiveConfig.coverageMode,

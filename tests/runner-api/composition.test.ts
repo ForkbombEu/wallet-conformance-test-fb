@@ -9,19 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  defaultProfileCatalogue,
-  selectProfileForRequest,
-} from "@/runner-api/profiles";
-
-import type { RunnerResult, RunRequest } from "../../src/runner-api/contract";
-
-import { ArtifactStore } from "../../src/runner-api/artifacts";
-import { type ExecuteFn, JobManager } from "../../src/runner-api/job-manager";
-import { JobStore } from "../../src/runner-api/job-store";
-import { validateAndAdaptNativeExport } from "../../src/runner-api/native-result-adapter";
-import { createRunnerApp } from "../../src/runner-api/server";
-import { summarizeResult } from "../../src/runner-api/summarize";
+import { validateAndAdaptNativeExport } from "@/runner-api/native-result-adapter";
+import { summarizeResult } from "@/runner-api/summarize";
 
 const TOKEN = "composition-token";
 
@@ -49,22 +38,6 @@ function makeProducerExport(overrides: Record<string, unknown> = {}) {
     startedAt: "2026-01-01T00:00:00Z",
     status: "FAILED",
     ...overrides,
-  };
-}
-
-function makeRequest(): RunRequest {
-  return {
-    category: "issuance",
-    contract_version: "1.0",
-    parameters: {},
-    profile_id: "credimi-issuance-smoke",
-    selection: { ids: ["credimi-issuance-smoke"] },
-    target: {
-      actor_name: "test",
-      actor_type: "issuer",
-      issuer_identifier: "https://issuer.example",
-    },
-    timeout_ms: 600_000,
   };
 }
 
@@ -135,14 +108,11 @@ describe("Real composition — producer → adapter → summarizer → API", () 
   });
 
   it("runId mismatch is rejected", () => {
-    try {
+    expect(() =>
       validateAndAdaptNativeExport(makeProducerExport(), {
         expectedRunId: "other-run",
-      });
-      expect.unreachable("should have thrown");
-    } catch (e) {
-      expect((e as { code?: string }).code).toBe("RUN_ID_MISMATCH");
-    }
+      }),
+    ).toThrow(expect.objectContaining({ code: "RUN_ID_MISMATCH" }));
   });
 
   it("zero assertions = not_tested", () => {
@@ -165,11 +135,8 @@ describe("Real composition — producer → adapter → summarizer → API", () 
 
   it("stale export from different run is rejected", () => {
     const staleExport = makeProducerExport({ runId: "OLD-RUN" });
-    try {
-      validateAndAdaptNativeExport(staleExport, { expectedRunId: "NEW-RUN" });
-      expect.unreachable("should have thrown");
-    } catch (e) {
-      expect((e as { code?: string }).code).toBe("RUN_ID_MISMATCH");
-    }
+    expect(() =>
+      validateAndAdaptNativeExport(staleExport, { expectedRunId: "NEW-RUN" }),
+    ).toThrow(expect.objectContaining({ code: "RUN_ID_MISMATCH" }));
   });
 });

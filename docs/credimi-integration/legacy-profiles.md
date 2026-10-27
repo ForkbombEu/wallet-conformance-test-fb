@@ -109,13 +109,33 @@ pnpm format:check
 pnpm lint:check
 ```
 
-### Start the runner API (compiled)
+### Start the runner API (compiled / installed package)
 
 ```bash
-CREDIMI_RUNNER_TOKEN=<token> node dist/src/runner-api/main.js
+# from a checkout after `pnpm build`, or from an installed package
+CREDIMI_RUNNER_TOKEN=<token> node <package>/dist/runner-api/main.js \
+  --profiles /etc/wct/profiles.json --state-dir /var/lib/wct-runner \
+  [--host 127.0.0.1] [--port 8789]
+
+# equivalent bin
+CREDIMI_RUNNER_TOKEN=<token> wct-runner --profiles ... --state-dir ...
 ```
 
-Binds to `127.0.0.1:8789` by default.
+Binds to `127.0.0.1:8789` by default; `--port 0` picks a free port and the
+startup line `WCT runner listening on http://host:<port>` shows the real one.
+Exit codes: 0 clean SIGINT/SIGTERM shutdown, 1 startup failure (invalid
+profiles, state root locked by another runner, port in use), 2 usage error.
+
+Operator files live outside the package: profile `configFile`,
+`authorizationDriver.modulePath` and `initializedAssets` resolve against the
+profiles JSON directory; selection `testFile` values are package-relative
+(`tests/credimi/issuance/credimi-flow.issuance.spec.ts`) and resolve to the
+emitted `dist/tests/**.js` in an installed package. The state dir holds run
+records, the `.owner.lock`, per-run workspaces and published artifacts.
+
+`engine.revision` is the git commit compiled into `dist/runner-api/main.js`
+by `pnpm build` (or `WCT_BUILD_REVISION` when building outside git). Running
+from source reports `unknown` with a limitation.
 
 ### Live recipe (NOT automatic — requires explicit endpoint)
 

@@ -10,6 +10,7 @@ import type { JobManager } from "./job-manager";
 
 import { ArtifactStore, isSafeArtifactId } from "./artifacts";
 import { invalidRequest, RunnerError, runRequestSchema } from "./contract";
+import { engineIdentity } from "./engine";
 import { type ProfileCatalogue, ProfileError } from "./profiles";
 
 export interface RunnerDependencies {
@@ -27,7 +28,6 @@ export interface RunnerDependencies {
 
 const JSON_LIMIT = "64kb";
 const CONTRACT_VERSION = "1.0";
-const ENGINE_ID = "pagopa-wct";
 
 // eslint-disable-next-line max-lines-per-function -- HTTP server with all v1 routes
 export function createRunnerApp(deps: RunnerDependencies): Express {
@@ -69,15 +69,7 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
     res.status(200).json({
       categories: [...new Set(deps.catalogue.profiles.map((p) => p.category))],
       contract_version: CONTRACT_VERSION,
-      engine: {
-        fork_repository:
-          "https://github.com/ForkbombEu/wallet-conformance-test-fb",
-        id: ENGINE_ID,
-        revision: "unknown",
-        upstream_repository:
-          "https://github.com/pagopa/wallet-conformance-test",
-        version: "1.2.1",
-      },
+      engine: engineIdentity(),
       max_timeout_ms: 3_600_000,
       profiles: deps.catalogue.profiles.map((p) => ({
         allowed_authorization_interaction: p.allowedAuthorizationInteraction,

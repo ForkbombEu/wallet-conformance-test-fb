@@ -78,7 +78,7 @@ export const createServer = (config: Config): express.Express => {
   return app;
 };
 
-if (isMainModule(import.meta.url)) {
+if (isMainModule(import.meta.url, "ta-server")) {
   const config = loadConfigWithHierarchy();
   const app = createServer(config);
   loadOrCreateServerCertificate(config)

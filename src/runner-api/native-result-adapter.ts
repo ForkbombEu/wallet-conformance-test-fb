@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import {
+  MAX_NATIVE_ERROR_MESSAGE,
+  MAX_NATIVE_ERRORS,
+  type NativeRunError,
+} from "@/report/native-export";
+
 // ---------------------------------------------------------------------------
 // Runtime schema for the actual legacy NativeExport (camelCase producer)
 // ---------------------------------------------------------------------------
@@ -19,10 +25,19 @@ const nativeAssertionSchema = z
   })
   .strict();
 
+const nativeRunErrorSchema = z
+  .object({
+    location: z.string().optional(),
+    message: z.string().max(MAX_NATIVE_ERROR_MESSAGE),
+    origin: z.enum(["module", "run", "suite", "unhandled"]),
+  })
+  .strict();
+
 export const nativeExportSchema = z
   .object({
     assertions: z.array(nativeAssertionSchema),
     closedAt: z.string().nullish(),
+    errors: z.array(nativeRunErrorSchema).max(MAX_NATIVE_ERRORS).optional(),
     phase: z.string(),
     runId: z.string(),
     sessionId: z.string(),
@@ -49,15 +64,23 @@ export interface AdaptedAssertion {
 // Adapted wire assertion (snake_case)
 // ---------------------------------------------------------------------------
 
-export interface AdapterOptions {
-  expectedCategory?: string;
-  expectedRunId: string;
-  expectedSelection?: string[];
+export interface AdaptedNativeExport {
+  assertions: AdaptedAssertion[];
+  /** Errors outside test bodies, kept for limitations (never wire fields). */
+  errors: NativeRunError[];
+  sessionId: string;
+  status: string;
 }
 
 // ---------------------------------------------------------------------------
 // Adapter
 // ---------------------------------------------------------------------------
+
+export interface AdapterOptions {
+  expectedCategory?: string;
+  expectedRunId: string;
+  expectedSelection?: string[];
+}
 
 export type NativeExportRaw = z.infer<typeof nativeExportSchema>;
 
@@ -73,7 +96,7 @@ export class NativeExportValidationError extends Error {
 export function validateAndAdaptNativeExport(
   raw: unknown,
   options: AdapterOptions,
-): { assertions: AdaptedAssertion[]; sessionId: string; status: string } {
+): AdaptedNativeExport {
   // Step 1: Validate raw native data against producer format
   const parsed = nativeExportSchema.safeParse(raw);
   if (!parsed.success) {
@@ -111,6 +134,7 @@ export function validateAndAdaptNativeExport(
 
   return {
     assertions,
+    errors: data.errors ?? [],
     sessionId: data.sessionId,
     status: data.status,
   };

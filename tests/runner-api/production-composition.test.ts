@@ -319,6 +319,10 @@ export async function driveAuthorization({ page, authorizationUrl, redirectUri }
               id: "waiting",
               testFile: join(FIXTURES, "waiting.issuance.spec.ts"),
             },
+            {
+              id: "teardown",
+              testFile: join(FIXTURES, "teardown.issuance.spec.ts"),
+            },
             { id: "credimi-issuance-smoke", testFile: SMOKE },
           ],
         },
@@ -591,6 +595,55 @@ describe("L15 — compiled legacy server, real native children", () => {
       });
       expect(replay.status).toBe(200);
       expect(replay.json.run_id).toBe(matrix.run_id);
+    },
+    SLOW,
+  );
+
+  it(
+    "L16: a passing check followed by a failing teardown is never pass; the next run still starts",
+    async () => {
+      const runId = await startRun(server.url, "teardown-1", {
+        selection: { ids: ["teardown"] },
+      });
+      const result = await terminal(server.url, runId);
+
+      expect(result.execution.status).toBe("completed");
+      expect(result.execution.exit_code).not.toBe(0);
+      expect(result.native.assertions.map((a) => a.native_status)).toEqual([
+        "PASS",
+      ]);
+      expect(result.native.native_suite_status).toBe("INCOMPLETE");
+      expect(result.summary.result).toBe("partial");
+      expect(result.limitations.join(" ")).toMatch(
+        /teardown failed on purpose/,
+      );
+
+      // The served raw export is the reporter's exact file, errors included.
+      const [bytes] = await download(server.url, result);
+      expect(
+        bytes?.equals(
+          readFileSync(
+            join(stateDir, "work", runId, "results", "native-results.json"),
+          ),
+        ),
+      ).toBe(true);
+      const raw = JSON.parse(bytes?.toString() ?? "{}") as {
+        errors?: { location?: string; message: string; origin: string }[];
+        status: string;
+      };
+      expect(raw.status).toBe("INCOMPLETE");
+      expect(raw.errors).toEqual([
+        expect.objectContaining({
+          location: "Production teardown",
+          message: expect.stringContaining("teardown failed on purpose"),
+          origin: "suite",
+        }),
+      ]);
+
+      const next = await startRun(server.url, "teardown-2", {
+        selection: { ids: ["matrix"] },
+      });
+      expect((await terminal(server.url, next)).summary.result).toBe("fail");
     },
     SLOW,
   );

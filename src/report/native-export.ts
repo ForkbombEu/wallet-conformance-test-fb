@@ -19,6 +19,11 @@ export interface NativeAssertion {
 export interface NativeExport {
   assertions: NativeAssertion[];
   closedAt: null | string;
+  /**
+   * Bounded errors that happened outside test bodies (collection, suite
+   * hooks, unhandled errors, an interrupted run). Absent when there were none.
+   */
+  errors?: NativeRunError[];
   phase: Phase;
   runId: string;
   sessionId: string;
@@ -26,9 +31,21 @@ export interface NativeExport {
   status: "FAILED" | "INCOMPLETE" | "OPEN" | "PASSED";
 }
 
+/** Most errors kept in one export, and the longest message kept per error. */
+export const MAX_NATIVE_ERRORS = 20;
+export const MAX_NATIVE_ERROR_MESSAGE = 2_048;
+
+export interface NativeRunError {
+  /** Module ID or suite name the error belongs to, when known. */
+  location?: string;
+  message: string;
+  origin: "module" | "run" | "suite" | "unhandled";
+}
+
 export function buildNativeExport(params: {
   assertions: NativeAssertion[];
   closedAt: null | string;
+  errors?: NativeRunError[];
   phase: Phase;
   runId: string;
   sessionId: string;
@@ -38,6 +55,9 @@ export function buildNativeExport(params: {
   return {
     assertions: params.assertions,
     closedAt: params.closedAt,
+    ...(params.errors && params.errors.length > 0
+      ? { errors: params.errors }
+      : {}),
     phase: params.phase,
     runId: params.runId,
     sessionId: params.sessionId,

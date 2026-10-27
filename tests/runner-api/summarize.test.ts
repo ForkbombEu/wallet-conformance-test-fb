@@ -194,3 +194,58 @@ describe("summarizeResult — aggregation table", () => {
     expect(s.result).toBe("fail");
   });
 });
+
+describe("summarizeResult — native suite status (L16)", () => {
+  const allPass = (native_suite_status: string) => ({
+    assertions: [makeAssertion(), makeAssertion({ assertion_id: "a2" })],
+    coverage_mode: "interoperability" as const,
+    native_suite_status,
+    scenario_outcomes: [],
+    sessions: [],
+  });
+
+  it("completed + all PASS + INCOMPLETE suite → partial, never pass", () => {
+    expect(summarizeResult(completed, allPass("INCOMPLETE")).result).toBe(
+      "partial",
+    );
+  });
+
+  it("completed + all PASS + unknown native status → partial", () => {
+    expect(summarizeResult(completed, allPass("SOMETHING_NEW")).result).toBe(
+      "partial",
+    );
+    expect(summarizeResult(completed, allPass("OPEN")).result).toBe("partial");
+  });
+
+  it("completed + all PASS + PASSED but nonzero exit → partial", () => {
+    expect(
+      summarizeResult({ ...completed, exit_code: 1 }, allPass("PASSED")).result,
+    ).toBe("partial");
+  });
+
+  it("unknown execution status with all PASS → partial", () => {
+    expect(
+      summarizeResult({ ...completed, status: "running" }, allPass("PASSED"))
+        .result,
+    ).toBe("partial");
+  });
+
+  it("ordinary native FAIL in a completed run stays fail", () => {
+    const s = summarizeResult(
+      { ...completed, exit_code: 1 },
+      {
+        ...allPass("FAILED"),
+        assertions: [makeAssertion({ native_status: "FAIL" })],
+      },
+    );
+    expect(s).toEqual({
+      assertion_count: 1,
+      native_failed_assertion_count: 1,
+      result: "fail",
+    });
+  });
+
+  it("completed + all PASS + PASSED + exit 0 still passes", () => {
+    expect(summarizeResult(completed, allPass("PASSED")).result).toBe("pass");
+  });
+});

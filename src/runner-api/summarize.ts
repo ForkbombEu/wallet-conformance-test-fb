@@ -4,6 +4,20 @@ type Execution = RunnerResult["execution"];
 type Native = RunnerResult["native"];
 type Summary = RunnerResult["summary"];
 
+/**
+ * Whether the native suite itself ended cleanly: status PASSED and, when the
+ * engine reported one, exit code 0.
+ */
+export function nativeSuiteClean(
+  execution: Execution,
+  native: Native,
+): boolean {
+  return (
+    native.native_suite_status === "PASSED" &&
+    (execution.exit_code === undefined || execution.exit_code === 0)
+  );
+}
+
 export function summarizeResult(execution: Execution, native: Native): Summary {
   const assertionCount = native.assertions.length;
   const nativeFailedCount = native.assertions.filter(
@@ -59,9 +73,9 @@ export function summarizeResult(execution: Execution, native: Native): Summary {
     };
   }
 
-  // Incomplete execution (cancel/timeout/error) with some assertions → partial
-  const incompleteStatuses = ["cancelled", "error", "timed_out"];
-  if (incompleteStatuses.includes(execution.status)) {
+  // Anything but a completed execution (cancel/timeout/error, or a status
+  // this summarizer does not know) with some assertions → partial
+  if (execution.status !== "completed") {
     return {
       assertion_count: assertionCount,
       native_failed_assertion_count: nativeFailedCount,
@@ -78,7 +92,17 @@ export function summarizeResult(execution: Execution, native: Native): Summary {
     };
   }
 
-  // Rule 5: complete, nonempty, all passed → pass
+  // Every collected assertion passed, but the native suite itself did not
+  // (hook/unhandled/collection errors, unknown status, nonzero exit) → partial
+  if (!nativeSuiteClean(execution, native)) {
+    return {
+      assertion_count: assertionCount,
+      native_failed_assertion_count: nativeFailedCount,
+      result: "partial",
+    };
+  }
+
+  // Rule 5: complete, nonempty, all passed, clean native suite → pass
   return {
     assertion_count: assertionCount,
     native_failed_assertion_count: nativeFailedCount,

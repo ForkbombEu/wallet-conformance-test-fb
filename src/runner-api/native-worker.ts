@@ -32,7 +32,7 @@ import {
 } from "./native-child-marker";
 import { validateAndAdaptNativeExport } from "./native-result-adapter";
 import { materializeRunIni } from "./run-ini";
-import { summarizeResult } from "./summarize";
+import { nativeSuiteClean, summarizeResult } from "./summarize";
 import { settlesWithin } from "./timing";
 
 // ---------------------------------------------------------------------------
@@ -71,6 +71,7 @@ export const NATIVE_LOG_CAP_BYTES = 4 * 1024 * 1024;
 const KILL_ESCALATION_MS = 2_000;
 const DRAIN_GRACE_MS = 5_000;
 const ERROR_TAIL_BYTES = 4_096;
+const RUN_ERROR_LIMITATION_CHARS = 300;
 
 /**
  * Environment prefixes owned by the native loader/reporter. Values inherited
@@ -296,33 +297,35 @@ function buildCompletedResult(input: {
   };
 
   // An OPEN session was never closed by the reporter: the child stopped
-  // mid-suite. Its assertions are kept, but the execution is incomplete.
+  // mid-suite. A child killed by a signal (no exit code) did not finish
+  // either. Their assertions are kept, but the execution is incomplete.
   const sessionClosed = adapted.status !== "OPEN";
+  const executionError = !sessionClosed
+    ? "native session did not close; the suite was interrupted"
+    : exitCode === null
+      ? "native child was terminated by a signal"
+      : undefined;
   const execution: RunnerResult["execution"] = {
-    ...(sessionClosed
-      ? {}
-      : { error: "native session did not close; the suite was interrupted" }),
+    ...(executionError ? { error: executionError } : {}),
     exit_code: exitCode ?? undefined,
     finished_at: input.finishedAt,
     started_at: input.startedAt,
-    status: sessionClosed ? "completed" : "error",
+    status: executionError ? "error" : "completed",
   };
 
-  let summary = summarizeResult(execution, native);
-  // Every collected assertion passed, but the native suite itself did not
-  // (hook failure, unhandled error, nonzero exit): never publish `pass`.
-  const suiteClean = adapted.status === "PASSED" && exitCode === 0;
-  const downgraded = summary.result === "pass" && !suiteClean;
-  if (downgraded) {
-    summary = { ...summary, result: "partial" };
-  }
+  const summary = summarizeResult(execution, native);
 
   const limitations: string[] = [];
-  if (downgraded) {
+  if (
+    sessionClosed &&
+    summary.result === "partial" &&
+    !nativeSuiteClean(execution, native)
+  ) {
     limitations.push(
-      `Native suite did not pass cleanly (status ${adapted.status}, exit code ${String(exitCode)}): errors outside test bodies or uncollected failures may exist`,
+      `Native suite did not pass cleanly (status ${adapted.status}, exit code ${String(exitCode)}): the run cannot pass`,
     );
   }
+  limitations.push(...runErrorLimitations(adapted.errors));
   if (!sessionClosed) {
     limitations.push(
       "Native session did not close: only assertions reported before the interruption are included",
@@ -479,6 +482,19 @@ function readNativeExport(
     return { adapted: null, problem: "no native tests were collected" };
   }
   return { adapted, problem: "" };
+}
+
+/**
+ * One bounded limitation summarising the native errors outside test bodies;
+ * the full messages stay in the raw native export artifact.
+ */
+function runErrorLimitations(errors: AdaptedExport["errors"]): string[] {
+  const [first] = errors;
+  if (!first) return [];
+  const where = first.location ? ` in ${first.location}` : "";
+  return [
+    `Native suite reported ${errors.length} error(s) outside test bodies; first (${first.origin}${where}): ${truncate(first.message, RUN_ERROR_LIMITATION_CHARS)}`,
+  ];
 }
 
 /**

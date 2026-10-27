@@ -10,8 +10,11 @@ import type { ConformanceCheck, Phase } from "@/report/types";
 import { openDb, resolveDbPath } from "@/report/db";
 import {
   buildNativeExport,
+  MAX_NATIVE_ERROR_MESSAGE,
+  MAX_NATIVE_ERRORS,
   type NativeAssertion,
   type NativeExport,
+  type NativeRunError,
   writeNativeExport,
 } from "@/report/native-export";
 import {
@@ -30,6 +33,9 @@ type ReporterTestCase = Parameters<
   NonNullable<Reporter["onTestCaseResult"]>
 >[0];
 
+type RunEndArgs = Parameters<NonNullable<Reporter["onTestRunEnd"]>>;
+type SerializedRunError = RunEndArgs[1][number];
+
 type SessionStatus = "FAILED" | "INCOMPLETE" | "PASSED";
 type TestType = Phase;
 
@@ -39,7 +45,9 @@ export class ConformanceReporter implements Reporter {
   private checkResults: CheckResult[] = [];
   private collectedAssertions: NativeAssertion[] = [];
   private db: DatabaseSync | undefined;
+  private runErrors: NativeRunError[] = [];
   private sessionId: string | undefined;
+  private startedAt = "";
   private readonly testType: TestType;
 
   private get exportEnabled(): boolean {
@@ -95,21 +103,22 @@ export class ConformanceReporter implements Reporter {
   }
 
   onTestRunEnd(
-    testModules: Parameters<NonNullable<Reporter["onTestRunEnd"]>>[0] = [],
-    unhandledErrors: Parameters<NonNullable<Reporter["onTestRunEnd"]>>[1] = [],
-    reason?: Parameters<NonNullable<Reporter["onTestRunEnd"]>>[2],
+    testModules: RunEndArgs[0],
+    unhandledErrors: RunEndArgs[1],
+    reason: RunEndArgs[2],
   ): void {
     if (!this.db || !this.sessionId) {
       return;
     }
 
-    // Errors outside test bodies (suite hooks, unhandled rejections) mean the
-    // suite did not pass, even when every collected assertion passed.
-    const suiteErrors =
-      unhandledErrors.length > 0 ||
-      testModules.some((m) => m.errors().length > 0) ||
-      reason === "failed";
-    const status = this.resolveFinalStatus(this.checkResults, suiteErrors);
+    // Errors outside test bodies (collection, suite hooks, unhandled errors,
+    // an interrupted run) mean the suite did not pass, even when every
+    // collected assertion passed.
+    this.runErrors = collectRunErrors(testModules, unhandledErrors, reason);
+    const status = this.resolveFinalStatus(
+      this.checkResults,
+      this.runErrors.length > 0 || reason !== "passed",
+    );
     closeSession(this.db, this.sessionId, status, new Date().toISOString());
     this.db.close();
 
@@ -125,12 +134,14 @@ export class ConformanceReporter implements Reporter {
     this.sessionId = randomUUID();
     this.checkResults = [];
     this.collectedAssertions = [];
+    this.runErrors = [];
+    this.startedAt = new Date().toISOString();
 
     createSession(this.db, {
       entityName: DEFAULT_ENTITY_NAME,
       id: this.sessionId,
       phase: this.testType,
-      startedAt: new Date().toISOString(),
+      startedAt: this.startedAt,
       status: "OPEN",
     });
   }
@@ -170,20 +181,25 @@ export class ConformanceReporter implements Reporter {
 
   private resolveFinalStatus(
     results: readonly CheckResult[],
-    suiteErrors = false,
+    suiteErrors: boolean,
   ): SessionStatus {
     if (results.includes("FAIL")) {
       return "FAILED";
     }
 
-    if (suiteErrors || results.includes("NOT_REACHED")) {
+    // Nothing ran, or something failed outside the collected assertions.
+    if (
+      suiteErrors ||
+      results.length === 0 ||
+      results.includes("NOT_REACHED")
+    ) {
       return "INCOMPLETE";
     }
 
     return "PASSED";
   }
 
-  private writeNativeResults(dbStatus: "OPEN" | SessionStatus): void {
+  private writeNativeResults(dbStatus: NativeExport["status"]): void {
     const outputDir = process.env.WCT_RESULTS_DIR;
     const runId = process.env.WCT_RUN_ID;
 
@@ -191,27 +207,62 @@ export class ConformanceReporter implements Reporter {
       return;
     }
 
-    const startedAt =
-      this.collectedAssertions[0]?.timestamp ?? new Date().toISOString();
-
     const open = dbStatus === "OPEN";
-    const exportStatus: NativeExport["status"] =
-      !open && this.collectedAssertions.length === 0 ? "INCOMPLETE" : dbStatus;
 
     const data = buildNativeExport({
       assertions: this.collectedAssertions,
       closedAt: open ? null : new Date().toISOString(),
+      errors: this.runErrors,
       phase: this.testType,
       runId,
       sessionId: this.sessionId,
-      startedAt,
-      status: exportStatus,
+      startedAt: this.startedAt,
+      status: dbStatus,
     });
 
     mkdirSync(outputDir, { recursive: true });
     writeNativeExport(outputDir, data);
     if (!open) console.log(`Native results written to ${outputDir}`);
   }
+}
+
+/**
+ * Collects the errors Vitest reports outside test bodies: module collection
+ * errors, suite hook errors, unhandled errors and an interrupted run. Bounded
+ * in count and message length; the assertions themselves are untouched.
+ */
+function collectRunErrors(
+  testModules: RunEndArgs[0],
+  unhandledErrors: RunEndArgs[1],
+  reason: RunEndArgs[2],
+): NativeRunError[] {
+  const errors: NativeRunError[] = [];
+  const add = (
+    origin: NativeRunError["origin"],
+    error: SerializedRunError,
+    location?: string,
+  ) => {
+    if (errors.length >= MAX_NATIVE_ERRORS) return;
+    errors.push({
+      ...(location ? { location } : {}),
+      message: runErrorMessage(error),
+      origin,
+    });
+  };
+
+  for (const testModule of testModules) {
+    for (const error of testModule.errors()) {
+      add("module", error, testModule.moduleId);
+    }
+    for (const suite of testModule.children.allSuites()) {
+      for (const error of suite.errors()) add("suite", error, suite.fullName);
+    }
+  }
+  for (const error of unhandledErrors) add("unhandled", error);
+  if (reason === "interrupted") {
+    add("run", { message: "The test run was interrupted before it finished" });
+  }
+  return errors;
 }
 
 function extractAncestorTitles(testCase: ReporterTestCase): string[] {
@@ -222,4 +273,12 @@ function extractAncestorTitles(testCase: ReporterTestCase): string[] {
     current = current.parent;
   }
   return ancestors;
+}
+
+function runErrorMessage(error: SerializedRunError): string {
+  const message =
+    typeof error.message === "string" && error.message.length > 0
+      ? error.message
+      : String(error.name ?? "Unknown error");
+  return message.slice(0, MAX_NATIVE_ERROR_MESSAGE);
 }

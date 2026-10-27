@@ -1,4 +1,9 @@
-import type { RunnerResult, RunRequest, RunSnapshot } from "./contract";
+import type {
+  RunnerResult,
+  RunRequest,
+  RunSnapshot,
+  RunStatus,
+} from "./contract";
 
 import {
   idempotencyConflict,
@@ -231,13 +236,22 @@ export class JobManager {
   ): Promise<void> {
     this.updateRun(run.runId, (r) => ({ ...r, status: "running" }));
 
+    // Install deadline timer from timeout_ms
+    const timeoutMs = run.request.timeout_ms ?? 600_000;
+    const deadlineTimer = setTimeout(() => {
+      abortController.abort();
+    }, timeoutMs);
+
     try {
+      const runRoot = this.store.workDir(run.runId);
       const evidence = await this.execute({
         abortSignal: abortController.signal,
         request: run.request,
         runId: run.runId,
-        runRoot: this.store.rootDir,
+        runRoot,
       });
+
+      clearTimeout(deadlineTimer);
 
       // Late completion must not overwrite terminal state or pending cancel
       const current = this.store.getRun(run.runId);
@@ -248,12 +262,15 @@ export class JobManager {
         return;
       }
 
+      // Persist result BEFORE setting terminal state
       this.updateRun(run.runId, (r) => ({
         ...r,
         result: evidence.result,
         status: "completed",
       }));
-    } catch {
+    } catch (error) {
+      clearTimeout(deadlineTimer);
+
       const current = this.store.getRun(run.runId);
       if (current && isTerminalStatus(current.status)) {
         return;
@@ -262,7 +279,17 @@ export class JobManager {
         return;
       }
 
-      this.updateRun(run.runId, (r) => ({ ...r, status: "error" }));
+      // Determine if this was a timeout or error
+      const isTimeout = abortController.signal.aborted;
+      const terminalStatus: RunStatus = isTimeout ? "timed_out" : "error";
+
+      // Persist minimal honest envelope on error/timeout
+      const errorResult = buildErrorResult(run, error);
+      this.updateRun(run.runId, (r) => ({
+        ...r,
+        result: errorResult,
+        status: terminalStatus,
+      }));
     }
   }
 
@@ -290,4 +317,43 @@ export class JobManager {
     const updated = updater({ ...run, updatedAt: this.clock().toISOString() });
     this.store.saveRun(updated);
   }
+}
+
+function buildErrorResult(run: StoredRun, error: unknown): RunnerResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return {
+    artifacts: [],
+    category: run.request.category,
+    contract_version: "1.0",
+    engine: {
+      fork_repository:
+        "https://github.com/ForkbombEu/wallet-conformance-test-fb",
+      id: "pagopa-wct",
+      revision: "unknown",
+      upstream_repository: "https://github.com/pagopa/wallet-conformance-test",
+      version: "unknown",
+    },
+    execution: {
+      error: message,
+      started_at: run.createdAt,
+      status: "error",
+    },
+    limitations: ["Infrastructure error: " + message],
+    native: {
+      assertions: [],
+      coverage_mode: "interoperability",
+      native_suite_status: "ERROR",
+      scenario_outcomes: [],
+      sessions: [],
+    },
+    profile_id: run.request.profile_id,
+    run_id: run.runId,
+    selection: run.request.selection,
+    summary: {
+      assertion_count: 0,
+      native_failed_assertion_count: 0,
+      result: "not_tested",
+    },
+    target: run.request.target,
+  };
 }

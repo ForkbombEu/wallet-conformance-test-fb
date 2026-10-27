@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { join } from "node:path";
 
@@ -51,7 +54,7 @@ export class JobStore {
   }
 
   static canonicalRequestHash(request: RunRequest): string {
-    const canonical = JSON.stringify(request, Object.keys(request).sort());
+    const canonical = JSON.stringify(sortKeysDeep(request));
     return createHash("sha256").update(canonical).digest("hex");
   }
 
@@ -65,11 +68,15 @@ export class JobStore {
 
   acquireRootLock(ownerId: string): boolean {
     const lockPath = join(this.rootDir, ".owner.lock");
-    if (existsSync(lockPath)) {
+    try {
+      // Atomic exclusive creation — O_CREAT | O_EXCL
+      const fd = openSync(lockPath, "wx");
+      writeSync(fd, ownerId);
+      closeSync(fd);
+      return true;
+    } catch {
       return false;
     }
-    writeFileSync(lockPath, ownerId, "utf-8");
-    return true;
   }
 
   allRuns(): StoredRun[] {
@@ -89,8 +96,6 @@ export class JobStore {
     }
     return runs;
   }
-
-  // -- record CRUD ---------------------------------------------------------
 
   findByKeyHash(keyHash: string): StoredRun | undefined {
     const ip = this.indexPath(keyHash);
@@ -112,6 +117,8 @@ export class JobStore {
     return JSON.parse(readFileSync(p, "utf-8")) as StoredRun;
   }
 
+  // -- record CRUD ---------------------------------------------------------
+
   hasRootLock(): boolean {
     return existsSync(join(this.rootDir, ".owner.lock"));
   }
@@ -122,8 +129,13 @@ export class JobStore {
     }
   }
 
-  releaseRootLock(): void {
-    rmSync(join(this.rootDir, ".owner.lock"), { force: true });
+  releaseRootLock(ownerToken?: string): void {
+    const lockPath = join(this.rootDir, ".owner.lock");
+    if (ownerToken && existsSync(lockPath)) {
+      const current = readFileSync(lockPath, "utf-8");
+      if (current !== ownerToken) return;
+    }
+    rmSync(lockPath, { force: true });
   }
 
   saveRun(run: StoredRun): void {
@@ -132,6 +144,10 @@ export class JobStore {
     writeFileSync(tmp, JSON.stringify(run, null, 2), "utf-8");
     renameSync(tmp, target);
     this.writeIndex(run);
+  }
+
+  workDir(runId: string): string {
+    return join(this.rootDir, "work", runId);
   }
 
   // -- idempotency index recovery -------------------------------------------
@@ -170,4 +186,21 @@ export class JobStore {
 
 export function generateRunId(): string {
   return randomUUID();
+}
+
+/**
+ * Recursively sorts object keys at every depth. Preserves array order.
+ */
+function sortKeysDeep(obj: unknown): unknown {
+  if (Array.isArray(obj)) {
+    return obj.map(sortKeysDeep);
+  }
+  if (obj !== null && typeof obj === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(obj).sort()) {
+      sorted[key] = sortKeysDeep((obj as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return obj;
 }

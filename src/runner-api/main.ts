@@ -29,7 +29,7 @@ export interface RunnerMainOptions {
   runRoot: string;
 }
 
-function loadProfiles(profilesPath: string): Profile[] {
+export function loadProfiles(profilesPath: string): Profile[] {
   const absPath = resolve(profilesPath);
   if (!existsSync(absPath)) {
     throw new Error(`Profiles file not found: ${absPath}`);
@@ -37,15 +37,55 @@ function loadProfiles(profilesPath: string): Profile[] {
   const raw = JSON.parse(readFileSync(absPath, "utf-8")) as {
     profiles?: unknown[];
   };
-  return (raw.profiles ?? []).map((p) => {
-    const profile = getProfile((p as { id?: string }).id ?? "");
-    if (!profile) {
+  const profilesRaw = raw.profiles ?? [];
+  if (profilesRaw.length === 0) {
+    throw new Error("Profiles file contains no profiles");
+  }
+
+  // Validate each profile and resolve paths against the profiles JSON directory
+  const profilesDir = resolve(absPath, "..");
+  const profiles: Profile[] = [];
+  const seenIds = new Set<string>();
+
+  for (const raw of profilesRaw) {
+    const p = raw as Record<string, unknown>;
+    const id = String(p.id ?? "");
+    if (!id) throw new Error("Profile missing id");
+    if (seenIds.has(id)) throw new Error(`Duplicate profile id: ${id}`);
+    seenIds.add(id);
+
+    // Resolve configFile against profiles JSON directory
+    const configFile = String(p.configFile ?? "");
+    if (!configFile) throw new Error(`Profile '${id}' missing configFile`);
+    const resolvedConfigFile = resolve(profilesDir, configFile);
+    if (!existsSync(resolvedConfigFile)) {
       throw new Error(
-        `Unknown profile in file: ${String((p as { id?: string }).id)}`,
+        `Profile '${id}' config not found: ${resolvedConfigFile}`,
       );
     }
-    return profile;
-  });
+
+    // Validate selections exist and are nonempty
+    const selections = (p.selections ?? []) as Array<{
+      id?: string;
+      testFile?: string;
+    }>;
+    if (selections.length === 0)
+      throw new Error(`Profile '${id}' has no selections`);
+    for (const sel of selections) {
+      if (!sel.id || !sel.testFile) {
+        throw new Error(`Profile '${id}' selection missing id or testFile`);
+      }
+    }
+
+    profiles.push({
+      ...p,
+      configFile: resolvedConfigFile,
+      id,
+      selections,
+    } as Profile);
+  }
+
+  return profiles;
 }
 
 export async function startRunner(
@@ -67,17 +107,23 @@ export async function startRunner(
 
   // Build real executor that dispatches to native worker
   const execute: ExecuteFn = async (ctx) => {
-    const profile = profiles[0];
+    // Find the requested profile
+    const profile = profiles.find((p) => p.id === ctx.request.profile_id);
     if (!profile) {
-      throw new Error("No profile loaded");
+      throw new Error(`Unknown profile: ${ctx.request.profile_id}`);
     }
+
+    // Load the actual INI config
+    const { loadConfigWithHierarchy } = await import("@/logic/config-loader");
+    const config = loadConfigWithHierarchy({
+      fileIni: profile.configFile,
+    });
 
     const effectiveConfig = buildEffectiveConfig(
       profile,
       ctx.request.selection.ids[0] ?? "",
       ctx.request.parameters ?? {},
-      // Config is loaded by the native worker; here we just need the profile
-      {} as never,
+      config,
       ctx.runRoot,
     );
 

@@ -22,6 +22,7 @@ import {
   JobManager,
 } from "./job-manager";
 import { JobStore } from "./job-store";
+import { assertNoOrphanedNativeGroups } from "./native-child-marker";
 import { createNativeExecutor, type ProcessAdapter } from "./native-worker";
 import {
   loadProfileCatalogue,
@@ -166,6 +167,8 @@ export async function startRunner(
     throw new Error(store.describeRootLock());
   }
   try {
+    // Never start on top of a native group a previous runner left running.
+    assertNoOrphanedNativeGroups(store.rootDir);
     return await startOwnedRunner(
       store,
       catalogue,

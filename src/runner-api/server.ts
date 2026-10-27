@@ -105,23 +105,28 @@ export function createRunnerApp(deps: RunnerDependencies): Express {
 
         const request: RunRequest = parsed.data;
 
-        try {
-          deps.validateRun(request);
-        } catch (error) {
-          if (error instanceof ProfileError) {
-            // A broken operator INI is a runner-side problem, not a bad request.
-            if (error.code === "PROFILE_CONFIG_INVALID") {
-              console.error(`[runner] ${error.message}:`, error.cause);
-              throw new RunnerError(error.code, 500, error.message);
+        // Validation runs only for new work, after the replay check.
+        const validate = () => {
+          try {
+            deps.validateRun(request);
+          } catch (error) {
+            if (error instanceof ProfileError) {
+              // A broken operator INI is a runner-side problem, not a bad request.
+              if (error.code === "PROFILE_CONFIG_INVALID") {
+                console.error(`[runner] ${error.message}:`, error.cause);
+                throw new RunnerError(error.code, 500, error.message);
+              }
+              throw new RunnerError(error.code, 400, error.message);
             }
-            throw new RunnerError(error.code, 400, error.message);
+            throw error;
           }
-          throw error;
-        }
+        };
 
         const { replayed, snapshot } = await deps.jobManager.submit(
           request,
           idempotencyKey,
+          "default",
+          validate,
         );
         res.status(replayed ? 200 : 202).json(snapshot);
       } catch (error) {

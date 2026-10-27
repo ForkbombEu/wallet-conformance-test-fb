@@ -26,6 +26,7 @@ import {
 } from "./job-store";
 import { validateAndAdaptNativeExport } from "./native-result-adapter";
 import { summarizeResult } from "./summarize";
+import { settlesWithin } from "./timing";
 
 /** Why the manager aborted a live run. Set before aborting. */
 export type AbortReason = "cancel" | "deadline" | "shutdown";
@@ -242,10 +243,16 @@ export class JobManager {
     return this.shutdownPromise;
   }
 
+  /**
+   * @param validate runs only for NEW work, after the idempotency replay
+   *   check, so retrying an accepted request never depends on validation
+   *   inputs (for example the operator INI) that changed since.
+   */
   async submit(
     request: RunRequest,
     idempotencyKey: string,
     namespace = "default",
+    validate?: () => void,
   ): Promise<{ replayed: boolean; snapshot: RunSnapshot }> {
     const keyHash = JobStore.keyHash(namespace, idempotencyKey);
     const requestHash = JobStore.canonicalRequestHash(request);
@@ -261,6 +268,8 @@ export class JobManager {
         snapshot: this.toSnapshot(existing),
       };
     }
+
+    validate?.();
 
     if (this.shutdownPromise) {
       throw new RunnerError(
@@ -332,23 +341,18 @@ export class JobManager {
    * when the worker actually settles.
    */
   private async awaitAborted(live: LiveRun, run: StoredRun): Promise<void> {
-    let timer: NodeJS.Timeout | undefined;
-    const expired = new Promise<"expired">((resolve) => {
-      timer = setTimeout(() => resolve("expired"), this.abortGraceMs);
+    if (await settlesWithin(live.done, this.abortGraceMs)) return;
+    const message = `Native worker did not stop within ${this.abortGraceMs} ms after the abort; process cleanup is unconfirmed`;
+    this.finalize(run, {
+      detail: message,
+      error: new Error(message),
+      // Keep whatever the native child already exported.
+      partialNative: readPartialNative(
+        this.store.workDir(run.runId),
+        run.runId,
+      ),
+      reason: live.abortReason,
     });
-    const outcome = await Promise.race([
-      live.done.then(() => "done" as const),
-      expired,
-    ]);
-    clearTimeout(timer);
-    if (outcome === "expired") {
-      const message = `Native worker did not stop within ${this.abortGraceMs} ms after the abort; process cleanup is unconfirmed`;
-      this.finalize(run, {
-        detail: message,
-        error: new Error(message),
-        reason: live.abortReason,
-      });
-    }
   }
 
   /**
@@ -376,15 +380,9 @@ export class JobManager {
 
     // Publication boundary: the worker's result is wire-validated before the
     // lifecycle is applied, and only a wire-valid result is ever stored.
-    let errorOutcome:
-      | undefined
-      | {
-          detail?: string;
-          error: unknown;
-          partialNative?: RunnerResult["native"];
-        } = "result" in outcome ? undefined : outcome;
-    let result: RunnerResult | undefined;
     let status: RunStatus = reason ? ABORT_STATUS[reason] : "error";
+    let failure = "result" in outcome ? undefined : outcome;
+    let result: RunnerResult | undefined;
 
     if ("result" in outcome) {
       const wire = runnerResultSchema.safeParse(outcome.result);
@@ -402,23 +400,10 @@ export class JobManager {
           .join("; ");
         const message = `Native result failed wire validation (${issues})`;
         // Keep the lifecycle status; only the invalid native data is dropped.
-        errorOutcome = { detail: message, error: new Error(message) };
+        failure = { detail: message, error: new Error(message) };
       }
     }
-    if (errorOutcome) {
-      result = buildErrorResult(
-        run,
-        errorOutcome.error,
-        status,
-        finishedAt,
-        reason,
-        errorOutcome.partialNative,
-      );
-      if (reason && errorOutcome.detail) {
-        result.limitations.push(errorOutcome.detail);
-      }
-    }
-    if (!result) return;
+    result ??= failureResult(run, failure, status, finishedAt, reason);
 
     this.store.saveRun({
       ...current,
@@ -524,6 +509,33 @@ function buildErrorResult(
     summary: summarizeResult(execution, native),
     target: run.request.target,
   };
+}
+
+function failureResult(
+  run: StoredRun,
+  failure:
+    | undefined
+    | {
+        detail?: string;
+        error: unknown;
+        partialNative?: RunnerResult["native"];
+      },
+  status: RunStatus,
+  finishedAt: string,
+  reason: AbortReason | undefined,
+): RunnerResult {
+  const result = buildErrorResult(
+    run,
+    failure?.error ?? new Error("Run ended without a result"),
+    status,
+    finishedAt,
+    reason,
+    failure?.partialNative,
+  );
+  if (reason && failure?.detail) {
+    result.limitations.push(failure.detail);
+  }
+  return result;
 }
 
 /** Reads a native export left in an interrupted run's workspace, if valid. */

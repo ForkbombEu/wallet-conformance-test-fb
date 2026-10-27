@@ -94,12 +94,22 @@ export class ConformanceReporter implements Reporter {
     }
   }
 
-  onTestRunEnd(): void {
+  onTestRunEnd(
+    testModules: Parameters<NonNullable<Reporter["onTestRunEnd"]>>[0] = [],
+    unhandledErrors: Parameters<NonNullable<Reporter["onTestRunEnd"]>>[1] = [],
+    reason?: Parameters<NonNullable<Reporter["onTestRunEnd"]>>[2],
+  ): void {
     if (!this.db || !this.sessionId) {
       return;
     }
 
-    const status = this.resolveFinalStatus(this.checkResults);
+    // Errors outside test bodies (suite hooks, unhandled rejections) mean the
+    // suite did not pass, even when every collected assertion passed.
+    const suiteErrors =
+      unhandledErrors.length > 0 ||
+      testModules.some((m) => m.errors().length > 0) ||
+      reason === "failed";
+    const status = this.resolveFinalStatus(this.checkResults, suiteErrors);
     closeSession(this.db, this.sessionId, status, new Date().toISOString());
     this.db.close();
 
@@ -158,12 +168,15 @@ export class ConformanceReporter implements Reporter {
     return "NOT_REACHED";
   }
 
-  private resolveFinalStatus(results: readonly CheckResult[]): SessionStatus {
+  private resolveFinalStatus(
+    results: readonly CheckResult[],
+    suiteErrors = false,
+  ): SessionStatus {
     if (results.includes("FAIL")) {
       return "FAILED";
     }
 
-    if (results.includes("NOT_REACHED")) {
+    if (suiteErrors || results.includes("NOT_REACHED")) {
       return "INCOMPLETE";
     }
 

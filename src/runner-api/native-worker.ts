@@ -26,9 +26,14 @@ import type {
 } from "./job-manager";
 
 import { engineIdentity, engineLimitations } from "./engine";
+import {
+  clearNativeChildMarkerIfGone,
+  writeNativeChildMarker,
+} from "./native-child-marker";
 import { validateAndAdaptNativeExport } from "./native-result-adapter";
 import { materializeRunIni } from "./run-ini";
 import { summarizeResult } from "./summarize";
+import { settlesWithin } from "./timing";
 
 // ---------------------------------------------------------------------------
 // Process adapter (injectable for testing)
@@ -85,6 +90,8 @@ export interface NativeExecutorOptions {
   processAdapter?: ProcessAdapter;
   request: RunRequest;
 }
+
+type AdaptedExport = ReturnType<typeof validateAndAdaptNativeExport>;
 
 interface DrainedStream {
   done: Promise<void>;
@@ -160,22 +167,7 @@ export function createNativeExecutor(
     ctx.abortSignal.throwIfAborted();
 
     const testFile = effectiveConfig.testFile;
-    if (!isAbsolute(testFile) || !existsSync(testFile)) {
-      throw new Error(`Selected native test file not found: ${testFile}`);
-    }
-    if (!existsSync(effectiveConfig.profileConfigPath)) {
-      throw new Error(
-        `Profile INI not found: ${effectiveConfig.profileConfigPath}`,
-      );
-    }
-
-    for (const writable of Object.values(effectiveConfig.writablePaths)) {
-      if (!writable.startsWith(`${runRoot}/`)) {
-        throw new Error(
-          `Writable path ${writable} is outside the run workspace ${runRoot}`,
-        );
-      }
-    }
+    assertRunnable(effectiveConfig, runRoot);
 
     const resultsDir = join(runRoot, "results");
     const logsDir = join(runRoot, "logs");
@@ -214,50 +206,21 @@ export function createNativeExecutor(
       stdio: "pipe",
     });
 
-    const stdoutLog = drainToFile(child.stdout, join(logsDir, "stdout.log"));
-    const stderrLog = drainToFile(child.stderr, join(logsDir, "stderr.log"));
-
-    const exitCode = await waitForChild(child, ctx.abortSignal);
-    // A descendant outside the process group could keep the pipes open;
-    // never wait for them indefinitely once the child itself has exited.
-    await settleWithin(
-      Promise.all([stdoutLog.done, stderrLog.done]),
-      DRAIN_GRACE_MS,
-      () => {
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-      },
+    const { exitCode, stderrTail } = await superviseChild(
+      child,
+      runRoot,
+      logsDir,
+      ctx.abortSignal,
     );
-    const stderrTail = stderrLog.tail() || stdoutLog.tail();
 
     const finishedAt = new Date().toISOString();
 
-    // Read and validate native export
     const exportPath = join(resultsDir, "native-results.json");
-    let adapted: null | ReturnType<typeof validateAndAdaptNativeExport> = null;
-    let exportProblem = "native export missing";
-
-    if (existsSync(exportPath)) {
-      try {
-        const raw = readFileSync(exportPath, "utf-8");
-        const parsed: unknown = JSON.parse(raw);
-        adapted = validateAndAdaptNativeExport(parsed, {
-          expectedRunId: runId,
-        });
-      } catch (error) {
-        exportProblem = `native export unreadable: ${
-          error instanceof Error ? error.message : String(error)
-        }`;
-        adapted = null;
-      }
-    }
-
-    // A launch/config/discovery failure (no tests collected, nonzero exit)
-    // is an execution error, not a readable conformance result.
-    if (adapted && adapted.assertions.length === 0 && exitCode !== 0) {
-      exportProblem = "no native tests were collected";
-      adapted = null;
-    }
+    const { adapted, problem: exportProblem } = readNativeExport(
+      exportPath,
+      runId,
+      exitCode,
+    );
 
     // Missing/corrupt/mismatched export → error (raw bytes still published)
     if (!adapted) {
@@ -276,56 +239,109 @@ export function createNativeExecutor(
       };
     }
 
-    // Build native section from adapted assertions
-    const native: RunnerResult["native"] = {
-      assertions: adapted.assertions,
-      coverage_mode: effectiveConfig.coverageMode,
-      native_suite_status: adapted.status,
-      scenario_outcomes: [],
-      sessions: [{ id: adapted.sessionId, status: adapted.status }],
-    };
-
-    // An OPEN session was never closed by the reporter: the child stopped
-    // mid-suite. Its assertions are kept, but the execution is incomplete.
-    const sessionClosed = adapted.status !== "OPEN";
-    const execution: RunnerResult["execution"] = {
-      ...(sessionClosed
-        ? {}
-        : { error: "native session did not close; the suite was interrupted" }),
-      exit_code: exitCode ?? undefined,
-      finished_at: finishedAt,
-      started_at: startedAt,
-      status: sessionClosed ? "completed" : "error",
-    };
-
-    const summary = summarizeResult(execution, native);
-
     // The artifact layer (publishRunEvidence) builds the manifest entries
     // from the exact bytes; the worker only declares private files.
     return {
       privateArtifactPaths: [exportPath],
-      result: {
-        artifacts: [],
-        category,
-        contract_version: "1.0",
-        engine: engineIdentity(),
-        execution,
-        limitations: [
-          ...(sessionClosed
-            ? []
-            : [
-                "Native session did not close: only assertions reported before the interruption are included",
-              ]),
-          ...engineLimitations(),
-        ],
-        native,
-        profile_id: effectiveConfig.profileId,
-        run_id: runId,
-        selection: request.selection,
-        summary,
-        target: request.target,
-      },
+      result: buildCompletedResult({
+        adapted,
+        effectiveConfig,
+        exitCode,
+        finishedAt,
+        request,
+        runId,
+        startedAt,
+      }),
     };
+  };
+}
+
+/** Checks a run can start before anything is spawned. */
+function assertRunnable(effectiveConfig: EffectiveConfig, runRoot: string) {
+  const testFile = effectiveConfig.testFile;
+  if (!isAbsolute(testFile) || !existsSync(testFile)) {
+    throw new Error(`Selected native test file not found: ${testFile}`);
+  }
+  if (!existsSync(effectiveConfig.profileConfigPath)) {
+    throw new Error(
+      `Profile INI not found: ${effectiveConfig.profileConfigPath}`,
+    );
+  }
+  for (const writable of Object.values(effectiveConfig.writablePaths)) {
+    if (!writable.startsWith(`${runRoot}/`)) {
+      throw new Error(
+        `Writable path ${writable} is outside the run workspace ${runRoot}`,
+      );
+    }
+  }
+}
+
+/** Builds the result of a run whose native export was readable. */
+function buildCompletedResult(input: {
+  adapted: AdaptedExport;
+  effectiveConfig: EffectiveConfig;
+  exitCode: null | number;
+  finishedAt: string;
+  request: RunRequest;
+  runId: string;
+  startedAt: string;
+}): RunnerResult {
+  const { adapted, effectiveConfig, exitCode, request } = input;
+  const native: RunnerResult["native"] = {
+    assertions: adapted.assertions,
+    coverage_mode: effectiveConfig.coverageMode,
+    native_suite_status: adapted.status,
+    scenario_outcomes: [],
+    sessions: [{ id: adapted.sessionId, status: adapted.status }],
+  };
+
+  // An OPEN session was never closed by the reporter: the child stopped
+  // mid-suite. Its assertions are kept, but the execution is incomplete.
+  const sessionClosed = adapted.status !== "OPEN";
+  const execution: RunnerResult["execution"] = {
+    ...(sessionClosed
+      ? {}
+      : { error: "native session did not close; the suite was interrupted" }),
+    exit_code: exitCode ?? undefined,
+    finished_at: input.finishedAt,
+    started_at: input.startedAt,
+    status: sessionClosed ? "completed" : "error",
+  };
+
+  let summary = summarizeResult(execution, native);
+  // Every collected assertion passed, but the native suite itself did not
+  // (hook failure, unhandled error, nonzero exit): never publish `pass`.
+  const suiteClean = adapted.status === "PASSED" && exitCode === 0;
+  const downgraded = summary.result === "pass" && !suiteClean;
+  if (downgraded) {
+    summary = { ...summary, result: "partial" };
+  }
+
+  const limitations: string[] = [];
+  if (downgraded) {
+    limitations.push(
+      `Native suite did not pass cleanly (status ${adapted.status}, exit code ${String(exitCode)}): errors outside test bodies or uncollected failures may exist`,
+    );
+  }
+  if (!sessionClosed) {
+    limitations.push(
+      "Native session did not close: only assertions reported before the interruption are included",
+    );
+  }
+
+  return {
+    artifacts: [],
+    category: effectiveConfig.category,
+    contract_version: "1.0",
+    engine: engineIdentity(),
+    execution,
+    limitations: [...limitations, ...engineLimitations()],
+    native,
+    profile_id: effectiveConfig.profileId,
+    run_id: input.runId,
+    selection: request.selection,
+    summary,
+    target: request.target,
   };
 }
 
@@ -372,6 +388,18 @@ function buildErrorResult(
     },
     target: request.target,
   };
+}
+
+/**
+ * The group was SIGKILLed when the child exited; give the kernel a moment to
+ * reap it before clearing the marker. A group that survives keeps its marker
+ * so the next runner startup refuses to run on top of it.
+ */
+async function clearMarkerOnceGone(runRoot: string, pid: number) {
+  for (let i = 0; i < 40; i++) {
+    if (clearNativeChildMarkerIfGone(runRoot, pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /**
@@ -423,19 +451,80 @@ function killGroup(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-/** Awaits `work`, but gives up after `ms`, calling `onTimeout`. */
-async function settleWithin(
-  work: Promise<unknown>,
-  ms: number,
-  onTimeout: () => void,
-): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const expired = new Promise<"expired">((resolve) => {
-    timer = setTimeout(() => resolve("expired"), ms);
-  });
-  const outcome = await Promise.race([work.then(() => "done"), expired]);
-  clearTimeout(timer);
-  if (outcome === "expired") onTimeout();
+/**
+ * Reads and adapts the raw native export. A launch/config/discovery failure
+ * (no tests collected, nonzero exit) is not a readable conformance result.
+ */
+function readNativeExport(
+  exportPath: string,
+  runId: string,
+  exitCode: null | number,
+): { adapted: AdaptedExport | null; problem: string } {
+  if (!existsSync(exportPath)) {
+    return { adapted: null, problem: "native export missing" };
+  }
+  let adapted: AdaptedExport;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(exportPath, "utf-8"));
+    adapted = validateAndAdaptNativeExport(parsed, { expectedRunId: runId });
+  } catch (error) {
+    return {
+      adapted: null,
+      problem: `native export unreadable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  if (adapted.assertions.length === 0 && exitCode !== 0) {
+    return { adapted: null, problem: "no native tests were collected" };
+  }
+  return { adapted, problem: "" };
+}
+
+/**
+ * Tracks the spawned child until it and its process group are gone: drains
+ * its output, records the group marker, waits for exit (honouring the abort
+ * signal) and clears the marker once the group is confirmed gone.
+ */
+async function superviseChild(
+  child: SpawnedProcess,
+  runRoot: string,
+  logsDir: string,
+  signal: AbortSignal,
+): Promise<{ exitCode: null | number; stderrTail: string }> {
+  const stdoutLog = drainToFile(child.stdout, join(logsDir, "stdout.log"));
+  const stderrLog = drainToFile(child.stderr, join(logsDir, "stderr.log"));
+
+  // Record the detached group so a crashed or timed-out runner can detect
+  // it on restart. If that fails, the child must not run untracked.
+  if (child.pid) {
+    try {
+      writeNativeChildMarker(runRoot, child.pid);
+    } catch (error) {
+      killGroup(child.pid, "SIGKILL");
+      await waitForChild(child, AbortSignal.abort());
+      throw new Error(
+        `Could not record the native child process group: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  const exitCode = await waitForChild(child, signal);
+  // A descendant outside the process group could keep the pipes open;
+  // never wait for them indefinitely once the child itself has exited.
+  if (
+    !(await settlesWithin(
+      Promise.all([stdoutLog.done, stderrLog.done]),
+      DRAIN_GRACE_MS,
+    ))
+  ) {
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+  }
+  if (child.pid) await clearMarkerOnceGone(runRoot, child.pid);
+  return { exitCode, stderrTail: stderrLog.tail() || stdoutLog.tail() };
 }
 
 function truncate(s: string, max: number): string {

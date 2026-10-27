@@ -313,6 +313,19 @@ export class JobStore {
     this.corrupt.set(runId, { file, reason, runId });
   }
 
+  private quarantinedOwnerOf(keyHash: string): string | undefined {
+    if (!/^[a-f0-9]{64}$/.test(keyHash) || !existsSync(this.quarantineDir)) {
+      return undefined;
+    }
+    const pattern = new RegExp(`"idempotencyKeyHash"\\s*:\\s*"${keyHash}"`);
+    for (const file of readdirSync(this.quarantineDir)) {
+      if (!file.endsWith(".json")) continue;
+      const text = readFileSync(join(this.quarantineDir, file), "utf-8");
+      if (pattern.test(text)) return file.slice(0, -".json".length);
+    }
+    return undefined;
+  }
+
   /**
    * Reads and validates one record. Corrupt records are quarantined. A
    * record hashed with the previous algorithm is authenticated against that
@@ -364,6 +377,10 @@ export class JobStore {
         return run;
       }
     }
+    // Without an index entry, a quarantined record can still own the key if
+    // its (possibly truncated) bytes name it.
+    const owner = this.quarantinedOwnerOf(keyHash);
+    if (owner) throw corruptRecordError(owner);
     return undefined;
   }
 

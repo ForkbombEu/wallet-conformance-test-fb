@@ -28,8 +28,30 @@ export function summarizeResult(execution: Execution, native: Native): Summary {
     };
   }
 
-  // Rule 2: failed assertion or scenario FAIL → fail
-  if (nativeFailedCount > 0 || scenarioFail) {
+  // Explicit scenario FAIL → fail (dominates)
+  if (scenarioFail) {
+    return {
+      assertion_count: assertionCount,
+      native_failed_assertion_count: nativeFailedCount,
+      result: "fail",
+    };
+  }
+
+  // INCONCLUSIVE scenario: remains inconclusive even with failed assertions,
+  // unless there is an explicit independent conformance failure (scenario FAIL).
+  // Per canonical contract: "INCONCLUSIVE plus failed strict-PASS matcher
+  // remains inconclusive unless a separate explicit conformance failure is
+  // established."
+  if (scenarioInconclusive) {
+    return {
+      assertion_count: assertionCount,
+      native_failed_assertion_count: nativeFailedCount,
+      result: "inconclusive",
+    };
+  }
+
+  // Failed assertion without INCONCLUSIVE scenario → fail
+  if (nativeFailedCount > 0) {
     return {
       assertion_count: assertionCount,
       native_failed_assertion_count: nativeFailedCount,
@@ -53,15 +75,6 @@ export function summarizeResult(execution: Execution, native: Native): Summary {
       assertion_count: assertionCount,
       native_failed_assertion_count: nativeFailedCount,
       result: "partial",
-    };
-  }
-
-  // Rule 3: INCONCLUSIVE scenario without associated failure → inconclusive
-  if (scenarioInconclusive) {
-    return {
-      assertion_count: assertionCount,
-      native_failed_assertion_count: nativeFailedCount,
-      result: "inconclusive",
     };
   }
 

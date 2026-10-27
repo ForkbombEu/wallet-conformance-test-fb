@@ -297,23 +297,24 @@ describe("native-worker — distinct DBs", () => {
 
 describe("native-worker — nonzero with export", () => {
   it("nonzero exit + readable export = completed with failure", async () => {
-    // Write a native export with a FAIL assertion
+    // Write a native export with a FAIL assertion (producer format = camelCase)
     writeFileSync(
       join(dir, "results", "native-results.json"),
       JSON.stringify({
         assertions: [
           {
-            ancestor_titles: [],
-            assertion_id: "a1",
+            ancestorTitles: [],
             file: "test.ts",
-            full_title: "CI_001: test",
-            native_status: "FAIL",
+            nativeStatus: "FAIL",
             phase: "issuance",
-            requirement_id: "CI_001",
-            vitest_status: "failed",
+            requirementId: "CI_001",
+            title: "CI_001: test",
+            vitestStatus: "failed",
           },
         ],
         closedAt: "2026-01-01T00:00:02Z",
+        phase: "issuance",
+        runId: "run-1",
         sessionId: "session-1",
         startedAt: "2026-01-01T00:00:00Z",
         status: "FAILED",

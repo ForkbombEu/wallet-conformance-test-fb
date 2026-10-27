@@ -17,6 +17,7 @@ import type {
   ExecutionEvidence,
 } from "./job-manager";
 
+import { validateAndAdaptNativeExport } from "./native-result-adapter";
 import { summarizeResult } from "./summarize";
 
 // ---------------------------------------------------------------------------
@@ -154,28 +155,24 @@ export function createNativeExecutor(
 
     const finishedAt = new Date().toISOString();
 
-    // Read native export
+    // Read and validate native export
     const exportPath = join(resultsDir, "native-results.json");
-    interface NativeExportData {
-      assertions: RunnerResult["native"]["assertions"];
-      closedAt: null | string;
-      sessionId: string;
-      startedAt: string;
-      status: string;
-    }
-    let nativeExport: NativeExportData | null = null;
+    let adapted: null | ReturnType<typeof validateAndAdaptNativeExport> = null;
 
     if (existsSync(exportPath)) {
       try {
         const raw = readFileSync(exportPath, "utf-8");
-        nativeExport = JSON.parse(raw) as NativeExportData;
+        const parsed = JSON.parse(raw);
+        adapted = validateAndAdaptNativeExport(parsed, {
+          expectedRunId: runId,
+        });
       } catch {
-        nativeExport = null;
+        adapted = null;
       }
     }
 
-    // Missing/corrupt export → error
-    if (!nativeExport) {
+    // Missing/corrupt/mismatched export → error
+    if (!adapted) {
       return {
         privateArtifactPaths: [],
         result: buildErrorResult(
@@ -190,14 +187,13 @@ export function createNativeExecutor(
       };
     }
 
-    // Build native section from export
-    const assertions = nativeExport.assertions;
+    // Build native section from adapted assertions
     const native: RunnerResult["native"] = {
-      assertions,
+      assertions: adapted.assertions,
       coverage_mode: effectiveConfig.coverageMode,
-      native_suite_status: nativeExport.status,
+      native_suite_status: adapted.status,
       scenario_outcomes: [],
-      sessions: [{ id: nativeExport.sessionId, status: nativeExport.status }],
+      sessions: [{ id: adapted.sessionId, status: adapted.status }],
     };
 
     const execution: RunnerResult["execution"] = {
@@ -217,7 +213,7 @@ export function createNativeExecutor(
         contract_version: "1.0",
         engine: {
           ...ENGINE_INFO,
-          revision: nativeExport.sessionId, // placeholder; real revision from git in production
+          revision: "unknown",
           version: readPackageVersion(),
         },
         execution,
